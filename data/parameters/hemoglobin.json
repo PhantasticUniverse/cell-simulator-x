@@ -1,0 +1,175 @@
+{
+  "_description": "Hemoglobin oxygen binding parameters for human red blood cells",
+  "_citations": {
+    "adair_model": "Imai K. Allosteric Effects in Haemoglobin. Cambridge University Press, 1982",
+    "adair_constants": "Winslow RM et al. The reaction of deoxygenated hemoglobin with carbon monoxide. J Biol Chem. 1977;252:2331-2337",
+    "dpg_effect": "Benesch R, Benesch RE. Intracellular organic phosphates as regulators of oxygen release by haemoglobin. Nature. 1969;221(5181):618-622",
+    "bohr_effect": "Bohr C, Hasselbalch K, Krogh A. Ueber einen in biologischer Beziehung wichtigen Einfluss. Skand Arch Physiol. 1904;16:402-412",
+    "kinetics": "Gibson QH. The kinetics of reactions between haemoglobin and gases. Prog Biophys Mol Biol. 1970;21:1-46",
+    "temperature": "Roughton FJW, Severinghaus JW. Accurate determination of O2 dissociation curve of human blood. J Appl Physiol. 1973;35:861-869"
+  },
+  "_units": {
+    "binding_constants": "per mmHg (mmHg⁻¹)",
+    "concentration": "mM (millimolar)",
+    "partial_pressure": "mmHg (millimeters of mercury)",
+    "temperature": "Kelvin (K)",
+    "enthalpy": "kcal/mol",
+    "kinetic_rates": "per second (s⁻¹) or per mM per second (mM⁻¹·s⁻¹)"
+  },
+
+  "standard_conditions": {
+    "_description": "Reference conditions for baseline parameters",
+    "ph": 7.4,
+    "temperature_K": 310.15,
+    "dpg_mM": 5.0,
+    "pco2_mmHg": 40.0
+  },
+
+  "adair_constants": {
+    "_description": "Successive binding constants for 4-site oxygen binding model",
+    "_citation": "Imai 1982, fitted to human HbA at standard conditions",
+    "_notes": "Values increase with each binding (positive cooperativity)",
+    "k1_per_mmHg": {
+      "value": 0.0188,
+      "_notes": "First O2 binds weakly (T state dominant)"
+    },
+    "k2_per_mmHg": {
+      "value": 0.0566,
+      "_notes": "Second binding, beginning of cooperativity"
+    },
+    "k3_per_mmHg": {
+      "value": 0.407,
+      "_notes": "Strong cooperativity, T→R transition"
+    },
+    "k4_per_mmHg": {
+      "value": 4.28,
+      "_notes": "Fourth O2 binds very strongly (R state)"
+    }
+  },
+
+  "oec_parameters": {
+    "_description": "Oxygen equilibrium curve characteristics at standard conditions",
+    "_citation": "Imai 1982, Table 6.2",
+    "p50_mmHg": {
+      "value": 26.8,
+      "range": [25.8, 27.8],
+      "_notes": "Partial pressure at 50% saturation"
+    },
+    "hill_coefficient": {
+      "value": 2.7,
+      "range": [2.6, 2.8],
+      "_notes": "Maximum slope of Hill plot, measure of cooperativity"
+    }
+  },
+
+  "allosteric_effects": {
+    "_description": "Modulators of hemoglobin oxygen affinity",
+
+    "bohr_effect": {
+      "_description": "pH effect on oxygen affinity",
+      "_citation": "Imai 1982; original: Bohr et al. 1904",
+      "coefficient": {
+        "value": -0.48,
+        "range": [-0.53, -0.43],
+        "_notes": "ΔlogP50/ΔpH; negative means lower pH → higher P50 (right shift)"
+      },
+      "_mechanism": "H+ binding to His146β and other residues stabilizes T state"
+    },
+
+    "dpg_effect": {
+      "_description": "2,3-DPG effect on oxygen affinity",
+      "_citation": "Benesch & Benesch 1969",
+      "sensitivity_mmHg_per_mM": {
+        "value": 2.4,
+        "range": [2.0, 3.0],
+        "_notes": "ΔP50 per mM change in 2,3-DPG"
+      },
+      "reference_concentration_mM": 5.0,
+      "_mechanism": "2,3-DPG binds in central cavity of deoxy-Hb, stabilizing T state"
+    },
+
+    "temperature_effect": {
+      "_description": "Temperature effect on oxygen affinity (van't Hoff)",
+      "_citation": "Roughton & Severinghaus 1973",
+      "delta_h_kcal_per_mol": {
+        "value": -14.5,
+        "_notes": "Enthalpy of oxygenation; negative = exothermic"
+      },
+      "reference_temperature_K": 310.15,
+      "_mechanism": "Higher temperature favors dissociated state (Le Chatelier)"
+    },
+
+    "co2_effect": {
+      "_description": "Direct CO2 effect (carbamino formation)",
+      "_citation": "Roughton 1970",
+      "sensitivity_per_mmHg": {
+        "value": 0.02,
+        "_notes": "Additional P50 shift beyond pH-mediated Bohr effect"
+      },
+      "reference_pco2_mmHg": 40.0,
+      "_mechanism": "CO2 forms carbamino compounds with N-terminal amino groups"
+    }
+  },
+
+  "kinetics": {
+    "_description": "Oxygen binding and release rate constants",
+    "_citation": "Gibson 1970",
+    "k_on_per_mM_per_sec": {
+      "value": 25.0,
+      "_notes": "Association rate constant for O2 binding"
+    },
+    "k_off_per_sec": {
+      "value": 30.0,
+      "_notes": "Dissociation rate constant"
+    },
+    "_notes": "These are effective rates; actual rates depend on conformation"
+  },
+
+  "physiological_values": {
+    "_description": "Typical values in human blood",
+    "hemoglobin_concentration_mM": {
+      "value": 5.0,
+      "range": [4.5, 5.5],
+      "_notes": "As tetramer; ~150 g/L or 2.3 mM as monomer"
+    },
+    "max_oxygen_capacity_mM": {
+      "value": 20.0,
+      "_notes": "4 × [Hb tetramer], assuming 4 O2 per tetramer"
+    },
+    "arterial_saturation": {
+      "value": 0.97,
+      "range": [0.95, 0.99],
+      "_notes": "Typical arterial oxygen saturation"
+    },
+    "venous_saturation": {
+      "value": 0.75,
+      "range": [0.70, 0.80],
+      "_notes": "Typical mixed venous oxygen saturation"
+    }
+  },
+
+  "validation_targets": {
+    "_description": "Key metrics for model validation against Imai 1982 data",
+    "_tolerance": "Values should be within stated tolerance of target",
+    "p50_mmHg": {
+      "target": 26.8,
+      "tolerance": 1.0,
+      "_conditions": "pH 7.4, 37°C, 5 mM 2,3-DPG, 40 mmHg pCO2"
+    },
+    "bohr_coefficient": {
+      "target": -0.48,
+      "tolerance": 0.05,
+      "_conditions": "Measured between pH 7.2 and 7.6"
+    },
+    "hill_coefficient": {
+      "target": 2.7,
+      "tolerance": 0.1,
+      "_conditions": "At P50, standard conditions"
+    },
+    "dpg_sensitivity_mmHg_per_mM": {
+      "target": 2.4,
+      "tolerance": 0.6,
+      "_conditions": "Between 3-7 mM 2,3-DPG range"
+    }
+  }
+}

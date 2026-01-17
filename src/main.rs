@@ -1,3 +1,6 @@
+// Allow non-snake-case for unit suffixes in field names (mM, mmHg, K, etc.)
+#![allow(non_snake_case)]
+
 //! Cell Simulator X - Entry point
 //!
 //! GPU-accelerated human red blood cell simulation engine.
@@ -8,6 +11,8 @@
 //!   cargo run -- --diagnose -n 1000 -f 10.0  # Custom steps and force
 //!   cargo run -- --diagnose-metabolism  # Run metabolism diagnostics (no GUI)
 //!   cargo run -- --diagnose-metabolism -d 10.0  # 10 second simulation
+//!   cargo run -- --diagnose-oxygen      # Run oxygen transport diagnostics (no GUI)
+//!   cargo run -- --diagnose-oxygen --ph 7.0  # Test at different pH
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -19,6 +24,8 @@ use cell_simulator_x::{
     render::RenderState,
     state::CellState,
     MetabolismSolver, MetabolismConfig, MetabolitePool,
+    HemoglobinSolver, HemoglobinState,
+    STANDARD_PH, STANDARD_DPG_MM, STANDARD_PCO2_MMHG,
 };
 use glam::Vec3;
 use winit::{
@@ -183,10 +190,16 @@ fn run_diagnostics(steps: usize, force_magnitude: f32) -> Result<()> {
 struct CliArgs {
     diagnose_physics: bool,
     diagnose_metabolism: bool,
+    diagnose_oxygen: bool,
     steps: usize,
     force: f32,
     duration_sec: f64,
     glucose_step: Option<f64>,
+    // Oxygen diagnostics parameters
+    ph: f64,
+    dpg_mM: f64,
+    temperature_C: f64,
+    pco2_mmHg: f64,
 }
 
 impl Default for CliArgs {
@@ -194,10 +207,15 @@ impl Default for CliArgs {
         Self {
             diagnose_physics: false,
             diagnose_metabolism: false,
+            diagnose_oxygen: false,
             steps: 1000,
             force: 5.0,
             duration_sec: 60.0,  // 60 seconds default for metabolism
             glucose_step: None,
+            ph: STANDARD_PH,
+            dpg_mM: STANDARD_DPG_MM,
+            temperature_C: 37.0,
+            pco2_mmHg: STANDARD_PCO2_MMHG,
         }
     }
 }
@@ -212,6 +230,7 @@ fn parse_args() -> CliArgs {
         match args[i].as_str() {
             "--diagnose" => cli.diagnose_physics = true,
             "--diagnose-metabolism" => cli.diagnose_metabolism = true,
+            "--diagnose-oxygen" => cli.diagnose_oxygen = true,
             "-n" | "--steps" => {
                 i += 1;
                 if i < args.len() {
@@ -236,19 +255,51 @@ fn parse_args() -> CliArgs {
                     cli.glucose_step = Some(args[i].parse().unwrap_or(10.0));
                 }
             }
+            "--ph" => {
+                i += 1;
+                if i < args.len() {
+                    cli.ph = args[i].parse().unwrap_or(STANDARD_PH);
+                }
+            }
+            "--dpg" => {
+                i += 1;
+                if i < args.len() {
+                    cli.dpg_mM = args[i].parse().unwrap_or(STANDARD_DPG_MM);
+                }
+            }
+            "--temp" => {
+                i += 1;
+                if i < args.len() {
+                    cli.temperature_C = args[i].parse().unwrap_or(37.0);
+                }
+            }
+            "--pco2" => {
+                i += 1;
+                if i < args.len() {
+                    cli.pco2_mmHg = args[i].parse().unwrap_or(STANDARD_PCO2_MMHG);
+                }
+            }
             "--help" | "-h" => {
                 println!("Cell Simulator X");
                 println!();
                 println!("Usage: cell-simulator-x [OPTIONS]");
                 println!();
                 println!("Options:");
-                println!("  --diagnose           Run physics diagnostics (no GUI)");
+                println!("  --diagnose             Run physics diagnostics (no GUI)");
                 println!("  --diagnose-metabolism  Run metabolism diagnostics (no GUI)");
-                println!("  -n, --steps N        Number of physics steps (default: 1000)");
-                println!("  -f, --force F        Force magnitude in μN (default: 5.0)");
-                println!("  -d, --duration D     Duration in seconds for metabolism (default: 60.0)");
-                println!("  --glucose-step G     Apply glucose step change at 50% duration");
-                println!("  --help, -h           Show this help");
+                println!("  --diagnose-oxygen      Run oxygen transport diagnostics (no GUI)");
+                println!("  -n, --steps N          Number of physics steps (default: 1000)");
+                println!("  -f, --force F          Force magnitude in μN (default: 5.0)");
+                println!("  -d, --duration D       Duration in seconds for metabolism (default: 60.0)");
+                println!("  --glucose-step G       Apply glucose step change at 50% duration");
+                println!();
+                println!("Oxygen diagnostics options:");
+                println!("  --ph PH                Intracellular pH (default: 7.4)");
+                println!("  --dpg DPG              2,3-DPG concentration in mM (default: 5.0)");
+                println!("  --temp TEMP            Temperature in °C (default: 37)");
+                println!("  --pco2 PCO2            CO2 partial pressure in mmHg (default: 40)");
+                println!();
+                println!("  --help, -h             Show this help");
                 std::process::exit(0);
             }
             _ => {}
@@ -381,6 +432,152 @@ fn run_metabolism_diagnostics(duration_sec: f64, glucose_step: Option<f64>) -> R
     Ok(())
 }
 
+/// Run oxygen transport diagnostics without GUI
+fn run_oxygen_diagnostics(ph: f64, dpg_mM: f64, temperature_C: f64, pco2_mmHg: f64) -> Result<()> {
+    println!("=== Cell Simulator X - Oxygen Transport Diagnostics ===\n");
+
+    let temperature_K = temperature_C + 273.15;
+    let solver = HemoglobinSolver::default();
+
+    // Print conditions
+    println!("Conditions:");
+    println!("  pH:          {:.2}", ph);
+    println!("  2,3-DPG:     {:.1} mM", dpg_mM);
+    println!("  Temperature: {:.1}°C ({:.1} K)", temperature_C, temperature_K);
+    println!("  pCO2:        {:.1} mmHg", pco2_mmHg);
+    println!();
+
+    // Calculate key parameters
+    let p50 = solver.calculate_p50(ph, dpg_mM, temperature_K, pco2_mmHg);
+    let hill_n = solver.calculate_hill_coefficient(ph, dpg_mM, temperature_K, pco2_mmHg);
+    let bohr_coeff = solver.measured_bohr_coefficient(dpg_mM, temperature_K, pco2_mmHg);
+
+    println!("=== Calculated OEC Parameters ===\n");
+    println!("P50:              {:.1} mmHg", p50);
+    println!("Hill coefficient: {:.2}", hill_n);
+    println!("Bohr coefficient: {:.2}", bohr_coeff);
+    println!();
+
+    // Validation against targets
+    println!("=== Validation Against Imai 1982 ===\n");
+
+    let p50_target = 26.8;
+    let p50_tolerance = 1.0;
+    let p50_pass = (p50 - p50_target).abs() <= p50_tolerance;
+    println!("P50: {:.1} mmHg {} (target: {:.1} ± {:.1} mmHg)",
+        p50,
+        if p50_pass { "✓" } else { "✗" },
+        p50_target, p50_tolerance);
+
+    let hill_target = 2.7;
+    let hill_tolerance = 0.1;
+    let hill_pass = (hill_n - hill_target).abs() <= hill_tolerance;
+    println!("Hill coefficient: {:.2} {} (target: {:.1} ± {:.1})",
+        hill_n,
+        if hill_pass { "✓" } else { "✗" },
+        hill_target, hill_tolerance);
+
+    let bohr_target = -0.48;
+    let bohr_tolerance = 0.05;
+    let bohr_pass = (bohr_coeff - bohr_target).abs() <= bohr_tolerance;
+    println!("Bohr coefficient: {:.2} {} (target: {:.2} ± {:.2})",
+        bohr_coeff,
+        if bohr_pass { "✓" } else { "✗" },
+        bohr_target, bohr_tolerance);
+
+    // Generate and display OEC
+    println!("\n=== Oxygen Equilibrium Curve ===\n");
+    println!("{:>8} {:>12}", "pO2", "Saturation");
+    println!("{:>8} {:>12}", "(mmHg)", "(%)");
+    println!("{}", "-".repeat(22));
+
+    let conditions = (ph, dpg_mM, temperature_K, pco2_mmHg);
+    let oec_points = [0.0, 5.0, 10.0, 15.0, 20.0, 26.8, 30.0, 40.0, 50.0, 60.0, 80.0, 100.0, 150.0];
+
+    for &po2 in &oec_points {
+        let sat = solver.calculate_saturation(po2, ph, dpg_mM, temperature_K, pco2_mmHg);
+        let marker = if (po2 - p50).abs() < 1.0 { " ← P50" } else { "" };
+        println!("{:8.1} {:11.1}%{}", po2, sat * 100.0, marker);
+    }
+
+    // Compare OEC at different pH values (Bohr effect demonstration)
+    println!("\n=== Bohr Effect Comparison ===\n");
+    println!("{:>8} {:>12} {:>12} {:>12}", "pO2", "pH 7.2", "pH 7.4", "pH 7.6");
+    println!("{:>8} {:>12} {:>12} {:>12}", "(mmHg)", "Sat %", "Sat %", "Sat %");
+    println!("{}", "-".repeat(50));
+
+    let test_po2s = [10.0, 20.0, 26.8, 40.0, 60.0, 100.0];
+    for &po2 in &test_po2s {
+        let sat_72 = solver.calculate_saturation(po2, 7.2, dpg_mM, temperature_K, pco2_mmHg);
+        let sat_74 = solver.calculate_saturation(po2, 7.4, dpg_mM, temperature_K, pco2_mmHg);
+        let sat_76 = solver.calculate_saturation(po2, 7.6, dpg_mM, temperature_K, pco2_mmHg);
+        println!("{:8.1} {:11.1}% {:11.1}% {:11.1}%", po2, sat_72 * 100.0, sat_74 * 100.0, sat_76 * 100.0);
+    }
+
+    // P50 comparison
+    let p50_72 = solver.calculate_p50(7.2, dpg_mM, temperature_K, pco2_mmHg);
+    let p50_74 = solver.calculate_p50(7.4, dpg_mM, temperature_K, pco2_mmHg);
+    let p50_76 = solver.calculate_p50(7.6, dpg_mM, temperature_K, pco2_mmHg);
+    println!();
+    println!("P50 comparison:");
+    println!("  pH 7.2: {:.1} mmHg", p50_72);
+    println!("  pH 7.4: {:.1} mmHg", p50_74);
+    println!("  pH 7.6: {:.1} mmHg", p50_76);
+
+    // 2,3-DPG effect demonstration
+    println!("\n=== 2,3-DPG Effect ===\n");
+    let dpg_levels = [3.0, 5.0, 7.0];
+    for &dpg in &dpg_levels {
+        let p50_dpg = solver.calculate_p50(STANDARD_PH, dpg, temperature_K, pco2_mmHg);
+        println!("  {:.1} mM 2,3-DPG: P50 = {:.1} mmHg", dpg, p50_dpg);
+    }
+
+    // Calculate 2,3-DPG sensitivity
+    let p50_low_dpg = solver.calculate_p50(STANDARD_PH, 3.0, temperature_K, pco2_mmHg);
+    let p50_high_dpg = solver.calculate_p50(STANDARD_PH, 7.0, temperature_K, pco2_mmHg);
+    let dpg_sensitivity = (p50_high_dpg - p50_low_dpg) / (7.0 - 3.0);
+    println!();
+    println!("2,3-DPG sensitivity: {:.1} mmHg/mM (target: ~2-3 mmHg/mM)", dpg_sensitivity);
+
+    // Dynamic binding test
+    println!("\n=== Dynamic Binding Kinetics ===\n");
+    let mut state = HemoglobinState::at_saturation(0.5, 5.0);
+    println!("Starting saturation: {:.1}%", state.saturation * 100.0);
+    println!("Applied pO2: 100 mmHg (high O2 environment)");
+    println!();
+
+    println!("{:>8} {:>12} {:>12}", "Time", "Saturation", "Bound O2");
+    println!("{:>8} {:>12} {:>12}", "(ms)", "(%)", "(mM)");
+    println!("{}", "-".repeat(36));
+
+    let dt = 0.001;  // 1 ms timestep
+    for i in 0..=10 {
+        let time_ms = i as f64 * 10.0;
+        println!("{:8.1} {:11.1}% {:11.2}", time_ms, state.saturation * 100.0, state.bound_o2_mM);
+        // 10 steps per print
+        for _ in 0..10 {
+            solver.step(&mut state, 100.0, conditions, dt);
+        }
+    }
+
+    println!();
+    println!("Final saturation: {:.1}%", state.saturation * 100.0);
+
+    // Overall validation summary
+    println!("\n=== Validation Summary ===\n");
+    let all_pass = p50_pass && hill_pass && bohr_pass;
+    if all_pass {
+        println!("✓ All validation targets met - Phase 4 complete!");
+    } else {
+        println!("Some validation targets not met:");
+        if !p50_pass { println!("  - P50 outside tolerance"); }
+        if !hill_pass { println!("  - Hill coefficient outside tolerance"); }
+        if !bohr_pass { println!("  - Bohr coefficient outside tolerance"); }
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -393,6 +590,10 @@ fn main() -> Result<()> {
 
     if cli.diagnose_metabolism {
         return run_metabolism_diagnostics(cli.duration_sec, cli.glucose_step);
+    }
+
+    if cli.diagnose_oxygen {
+        return run_oxygen_diagnostics(cli.ph, cli.dpg_mM, cli.temperature_C, cli.pco2_mmHg);
     }
 
     log::info!("Cell Simulator X starting...");

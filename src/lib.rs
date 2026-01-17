@@ -17,6 +17,8 @@ pub mod state;
 pub use biochemistry::{
     MetabolismSolver, MetabolismConfig, MetabolitePool, MetabolismDiagnostics,
     ExtendedMetaboliteIndices,
+    HemoglobinSolver, HemoglobinState, OxygenDiagnostics,
+    STANDARD_PH, STANDARD_TEMPERATURE_K, STANDARD_DPG_MM, STANDARD_PCO2_MMHG,
 };
 pub use config::Parameters;
 pub use geometry::{Mesh, SpectrinNetwork};

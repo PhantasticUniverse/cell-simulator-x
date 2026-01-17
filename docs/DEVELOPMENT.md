@@ -23,8 +23,15 @@
 - **Rapoport-Luebering Shunt**: BPGM/BPGP for 2,3-DPG regulation
 - **Validated**: ATP 1.5-2.5 mM, 2,3-DPG 4.5-5.5 mM, P50 ~27 mmHg
 
-### Phase 4: Oxygen Transport (Next)
-- Hemoglobin binding and O2 dynamics
+### Phase 4: Oxygen Transport ✅
+- **Adair 4-Site Model**: Sequential O2 binding with cumulative constants
+- **Allosteric Effects**: Bohr (pH), 2,3-DPG, temperature (van't Hoff), CO2
+- **Dynamic Kinetics**: O2 uptake/release with on/off rates
+- **Validated**: P50 26.8±1 mmHg, Hill n 2.7±0.1, Bohr -0.48±0.05
+
+### Phase 5: (Next)
+- Integration of oxygen transport with metabolism
+- Full cell simulation with coupled systems
 
 ## Module Structure
 
@@ -57,6 +64,17 @@ cargo run -- --diagnose-metabolism --glucose-step 5.0  # Perturbation
 - Glycolysis + shunt simulation
 - Reports ATP, 2,3-DPG, glucose, lactate
 
+### Oxygen Transport
+```bash
+cargo run -- --diagnose-oxygen               # Default: standard conditions
+cargo run -- --diagnose-oxygen --ph 7.2      # Test Bohr effect
+cargo run -- --diagnose-oxygen --dpg 7.0     # Test 2,3-DPG effect
+cargo run -- --diagnose-oxygen --temp 40     # Test temperature effect
+```
+- Adair equation with allosteric effects
+- Generates OEC (oxygen equilibrium curve)
+- Validates P50, Hill coefficient, Bohr coefficient
+
 ## GUI Controls
 
 | Key | Action |
@@ -73,7 +91,10 @@ cargo run -- --diagnose-metabolism --glucose-step 5.0  # Perturbation
 
 | Metric | Target | Source |
 |--------|--------|--------|
-| P50 oxygen | 26.8 ± 1 mmHg | PRD |
+| P50 oxygen | 26.8 ± 1 mmHg | Imai 1982 |
+| Hill coefficient | 2.7 ± 0.1 | Imai 1982 |
+| Bohr coefficient | -0.48 ± 0.05 | Imai 1982 |
+| 2,3-DPG sensitivity | ~2.4 mmHg/mM | Benesch 1969 |
 | ATP | 1.5-2.5 mM | Beutler 1984 |
 | 2,3-DPG | 4.5-5.5 mM | Benesch 1969 |
 | Shear modulus | 5.5 μN/m | Evans 1977 |
