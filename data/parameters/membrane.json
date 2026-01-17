@@ -1,0 +1,17 @@
+{
+  "_description": "RBC membrane mechanical parameters",
+  "_citations": {
+    "shear_modulus": "Evans EA, Waugh R. Osmotic correction to elastic area compressibility measurements on red cell membrane. Biophys J. 1977;20(3):307-313; Henon S et al. A new determination of the shear modulus of the human erythrocyte membrane using optical tweezers. Biophys J. 1999;76(2):1145-1151",
+    "bending_modulus": "Evans EA. Bending elastic modulus of red blood cell membrane derived from buckling instability in micropipet aspiration tests. Biophys J. 1983;43(1):27-30",
+    "area_modulus": "Evans EA, Waugh R, Melnik L. Elastic area compressibility modulus of red cell membrane. Biophys J. 1976;16(6):585-595",
+    "spectrin_properties": "Rief M, Pascual J, Saraste M, Gaub HE. Single molecule force spectroscopy of spectrin repeats: low unfolding forces in helix bundles. J Mol Biol. 1999;286(2):553-561",
+    "membrane_viscosity": "Hochmuth RM, Worthy PR, Evans EA. Red cell extensional recovery and the determination of membrane viscosity. Biophys J. 1979;26(1):101-114"
+  },
+  "shear_modulus_uN_per_m": 5.5,
+  "bending_modulus_pN_um": 0.18,
+  "area_modulus_mN_per_m": 450.0,
+  "spectrin_contour_length_um": 0.200,
+  "spectrin_persistence_length_um": 0.020,
+  "spectrin_rest_length_um": 0.075,
+  "membrane_viscosity_pN_s_per_um": 0.6
+}

@@ -48,7 +48,25 @@ See `PRD.md` for:
 
 ## Current Phase
 
-**Phase 1: Foundation** - Project setup and geometry
+**Phase 1: Foundation** - ✅ COMPLETE
+
+### Implemented Features
+- Fung-Tong parametric RBC geometry (biconcave disc)
+- Surface mesh generation (~10K vertices)
+- Spectrin network graph (~33K tetramers, hexagonal lattice)
+- WebGPU/Metal rendering pipeline with Phong shading
+- Orbit camera with mouse controls
+- Parameter system with JSON configs and citations
+- State structures for biochemistry, physics, environment
+
+### Controls
+- **Mouse drag**: Orbit camera
+- **S key**: Toggle spectrin network overlay
+- **R key**: Reset camera
+- **Escape**: Exit
+
+### Next Phase
+**Phase 2: Mechanics** - Membrane mechanics and DPD solver
 - See PRD.md Section 7 for detailed phase checklist
 
 ## Critical Validation Targets

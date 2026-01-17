@@ -1,0 +1,14 @@
+{
+  "_description": "RBC geometry parameters based on Fung-Tong parametric equations",
+  "_citations": {
+    "cell_radius": "Evans EA, Fung YC. Improved measurements of the erythrocyte geometry. Microvasc Res. 1972;4(4):335-347",
+    "fung_tong_coefficients": "Fung YC, Tong P, Patitucci P. High-resolution data on the geometry of red blood cells. Biorheology. 1981;18(3-6):369-385",
+    "spectrin_count": "Lux SE. Anatomy of the red cell membrane skeleton: unanswered questions. Blood. 2016;127(2):187-199"
+  },
+  "cell_radius_um": 3.91,
+  "fung_tong_c0_um": 0.81,
+  "fung_tong_c2_um": 7.83,
+  "fung_tong_c4_um": -4.39,
+  "mesh_resolution": 50,
+  "spectrin_target_count": 33000
+}

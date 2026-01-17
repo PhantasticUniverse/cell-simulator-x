@@ -1,0 +1,18 @@
+//! Cell Simulator X - GPU-accelerated human red blood cell simulation engine
+//!
+//! This library integrates mechanics, metabolism, and oxygen transport
+//! to provide a comprehensive RBC simulation.
+
+// Allow non-snake-case for unit suffixes in field names (mM, mmHg, μN, etc.)
+// This follows the project convention of including units in names.
+#![allow(non_snake_case)]
+
+pub mod config;
+pub mod geometry;
+pub mod render;
+pub mod state;
+
+pub use config::Parameters;
+pub use geometry::{Mesh, SpectrinNetwork};
+pub use render::{Camera, RenderState};
+pub use state::CellState;
