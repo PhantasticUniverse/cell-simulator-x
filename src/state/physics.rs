@@ -10,8 +10,10 @@ use glam::Vec3;
 pub struct PhysicsState {
     /// Membrane tension state
     pub membrane: MembraneState,
-    /// Per-vertex forces (μN)
+    /// Per-vertex forces (μN) - computed each step
     pub vertex_forces_uN: Vec<Vec3>,
+    /// Per-vertex external forces (μN) - persistent until cleared
+    pub external_forces_uN: Vec<Vec3>,
     /// Per-vertex velocities (μm/s)
     pub vertex_velocities_um_per_sec: Vec<Vec3>,
     /// Total elastic energy of the membrane (pJ)
@@ -34,6 +36,7 @@ impl PhysicsState {
         Self {
             membrane: MembraneState::default(),
             vertex_forces_uN: vec![Vec3::ZERO; vertex_count],
+            external_forces_uN: vec![Vec3::ZERO; vertex_count],
             vertex_velocities_um_per_sec: vec![Vec3::ZERO; vertex_count],
             elastic_energy_pJ: 0.0,
             spectrin_energy_pJ: 0.0,
@@ -41,6 +44,20 @@ impl PhysicsState {
             simulation_time_sec: 0.0,
             step_count: 0,
             reference_positions: Vec::new(),
+        }
+    }
+
+    /// Set external force on a vertex (persists until cleared)
+    pub fn set_external_force(&mut self, vertex_idx: usize, force: Vec3) {
+        if vertex_idx < self.external_forces_uN.len() {
+            self.external_forces_uN[vertex_idx] = force;
+        }
+    }
+
+    /// Clear all external forces
+    pub fn clear_external_forces(&mut self) {
+        for f in self.external_forces_uN.iter_mut() {
+            *f = Vec3::ZERO;
         }
     }
 

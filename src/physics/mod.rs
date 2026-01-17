@@ -103,8 +103,19 @@ impl PhysicsSolver {
         if physics_state.vertex_forces_uN.len() != n_vertices {
             physics_state.vertex_forces_uN = vec![Vec3::ZERO; n_vertices];
         }
+        if physics_state.external_forces_uN.len() != n_vertices {
+            physics_state.external_forces_uN = vec![Vec3::ZERO; n_vertices];
+        }
         if physics_state.vertex_velocities_um_per_sec.len() != n_vertices {
             physics_state.vertex_velocities_um_per_sec = vec![Vec3::ZERO; n_vertices];
+        }
+
+        // For first step, initialize forces from external forces
+        // (subsequent steps use forces computed at end of previous step)
+        if physics_state.step_count == 0 {
+            for i in 0..n_vertices {
+                physics_state.vertex_forces_uN[i] = physics_state.external_forces_uN[i];
+            }
         }
 
         // Get current positions
@@ -133,9 +144,9 @@ impl PhysicsSolver {
         self.recompute_normals(mesh);
 
         // === Compute forces at new positions ===
-        // Clear forces
-        for force in physics_state.vertex_forces_uN.iter_mut() {
-            *force = Vec3::ZERO;
+        // Start with external forces (persistent)
+        for (i, force) in physics_state.vertex_forces_uN.iter_mut().enumerate() {
+            *force = physics_state.external_forces_uN.get(i).copied().unwrap_or(Vec3::ZERO);
         }
 
         // 1. WLC spectrin forces
@@ -187,6 +198,8 @@ impl PhysicsSolver {
 
         // Update simulation time
         self.time_sec += dt;
+        physics_state.simulation_time_sec += dt as f64;
+        physics_state.step_count += 1;
     }
 
     /// Recompute vertex normals after position update
@@ -224,11 +237,14 @@ impl PhysicsSolver {
         }
     }
 
-    /// Apply an external force to a specific vertex
+    /// Apply an external force to a specific vertex (persists until cleared)
     pub fn apply_external_force(&self, physics_state: &mut PhysicsState, vertex_idx: usize, force_uN: Vec3) {
-        if vertex_idx < physics_state.vertex_forces_uN.len() {
-            physics_state.vertex_forces_uN[vertex_idx] += force_uN;
-        }
+        physics_state.set_external_force(vertex_idx, force_uN);
+    }
+
+    /// Clear all external forces
+    pub fn clear_external_forces(&self, physics_state: &mut PhysicsState) {
+        physics_state.clear_external_forces();
     }
 
     /// Get total kinetic energy of the system

@@ -1,6 +1,11 @@
 //! Cell Simulator X - Entry point
 //!
 //! GPU-accelerated human red blood cell simulation engine.
+//!
+//! CLI Usage:
+//!   cargo run                    # Run interactive simulation
+//!   cargo run -- --diagnose      # Run physics diagnostics (no GUI)
+//!   cargo run -- --diagnose -n 1000 -f 10.0  # Custom steps and force
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,8 +25,210 @@ use winit::{
     window::WindowBuilder,
 };
 
+/// Run physics diagnostics without GUI
+fn run_diagnostics(steps: usize, force_magnitude: f32) -> Result<()> {
+    println!("=== Cell Simulator X - Physics Diagnostics ===\n");
+
+    // Load parameters
+    let params = Parameters::load_or_default();
+    println!("Cell radius: {:.2} μm", params.geometry.cell_radius_um);
+
+    // Create cell state
+    let mut cell_state = CellState::new(&params);
+    let n_vertices = cell_state.geometry.mesh.vertices.len();
+    println!("Mesh vertices: {}", n_vertices);
+    println!("Spectrin nodes: {}", cell_state.geometry.spectrin_network.nodes.len());
+
+    // Store initial positions
+    let initial_positions: Vec<Vec3> = cell_state
+        .geometry
+        .mesh
+        .vertices
+        .iter()
+        .map(|v| v.position_vec3())
+        .collect();
+
+    // Find vertices on upper surface within a radius (simulating micropipette contact)
+    let pipette_radius = 1.0; // 1 μm radius pipette
+    let center = Vec3::new(0.0, 0.0, initial_positions.iter()
+        .filter(|p| p.z > 0.0)
+        .map(|p| p.z)
+        .fold(0.0f32, f32::max)); // Top of cell
+
+    let mut force_vertices: Vec<usize> = Vec::new();
+    let mut center_idx = 0;
+    let mut min_dist = f32::MAX;
+
+    for (i, pos) in initial_positions.iter().enumerate() {
+        if pos.z > 0.0 {
+            let dist_xy = (pos.truncate() - center.truncate()).length();
+            if dist_xy < pipette_radius {
+                force_vertices.push(i);
+            }
+            if dist_xy < min_dist {
+                min_dist = dist_xy;
+                center_idx = i;
+            }
+        }
+    }
+
+    println!("Force target: {} vertices within {:.1} μm radius of center",
+             force_vertices.len(), pipette_radius);
+    println!("Center vertex {} at {:?}", center_idx, initial_positions[center_idx]);
+
+    // Initialize physics solver
+    let physics_config = PhysicsConfig {
+        dt_sec: 1e-5,
+        temperature_K: 310.0,
+        enable_thermal_noise: false, // Disable noise for reproducible diagnostics
+        membrane_damping: 5.0, // Damping for stable response
+    };
+    let mut physics_solver = PhysicsSolver::new(&cell_state.geometry.mesh, physics_config);
+
+    // Apply force to single center vertex for clear behavior
+    println!("Total force: {:.2} μN applied to center vertex", force_magnitude);
+    println!("\n--- Running {} physics steps ---\n", steps);
+
+    let force = Vec3::new(0.0, 0.0, -force_magnitude);  // Downward
+    cell_state.physics.set_external_force(center_idx, force);
+
+    // Run physics steps
+    let start_time = Instant::now();
+    for step in 0..steps {
+        // Step physics
+        physics_solver.step(
+            &mut cell_state.geometry.mesh,
+            &cell_state.geometry.spectrin_network,
+            &mut cell_state.physics,
+        );
+
+        // Report progress every 10%
+        if steps >= 10 && step % (steps / 10) == 0 {
+            let progress = (step as f32 / steps as f32) * 100.0;
+            let target_pos = cell_state.geometry.mesh.vertices[center_idx].position_vec3();
+            let displacement = target_pos - initial_positions[center_idx];
+            println!(
+                "  {:3.0}%: step={}, target_z={:.4} μm, Δz={:.4} μm",
+                progress, step, target_pos.z, displacement.z
+            );
+        }
+    }
+    let elapsed = start_time.elapsed();
+
+    // Compute final statistics
+    let final_positions: Vec<Vec3> = cell_state
+        .geometry
+        .mesh
+        .vertices
+        .iter()
+        .map(|v| v.position_vec3())
+        .collect();
+
+    let displacements: Vec<f32> = initial_positions
+        .iter()
+        .zip(final_positions.iter())
+        .map(|(i, f)| (*f - *i).length())
+        .collect();
+
+    let max_displacement = displacements.iter().cloned().fold(0.0f32, f32::max);
+    let avg_displacement = displacements.iter().sum::<f32>() / n_vertices as f32;
+    let target_displacement = final_positions[center_idx] - initial_positions[center_idx];
+
+    let max_velocity = cell_state.physics.max_velocity_um_per_sec();
+    let total_energy = cell_state.physics.total_energy_pJ();
+
+    println!("\n=== Results ===");
+    println!("Elapsed time: {:.2?}", elapsed);
+    println!("Steps per second: {:.0}", steps as f32 / elapsed.as_secs_f32());
+    println!("Simulation time: {:.4} ms", cell_state.physics.simulation_time_sec * 1000.0);
+    println!();
+    println!("Target vertex displacement: ({:.4}, {:.4}, {:.4}) μm",
+        target_displacement.x, target_displacement.y, target_displacement.z);
+    println!("Target vertex |displacement|: {:.4} μm", target_displacement.length());
+    println!();
+    println!("Max displacement (any vertex): {:.4} μm", max_displacement);
+    println!("Avg displacement (all vertices): {:.6} μm", avg_displacement);
+    println!("Max velocity: {:.2} μm/s", max_velocity);
+    println!("Total energy: {:.4} pJ", total_energy);
+
+    // Diagnostic checks
+    println!("\n=== Diagnostic Checks ===");
+    if max_displacement < 1e-6 {
+        println!("⚠️  WARNING: No significant displacement detected!");
+        println!("   Possible causes:");
+        println!("   - Force too small (try -f 100)");
+        println!("   - Damping too high");
+        println!("   - Not enough steps (try -n 10000)");
+    } else if max_displacement > 1.0 {
+        println!("⚠️  WARNING: Very large displacement - simulation may be unstable");
+    } else {
+        println!("✓ Displacement looks reasonable");
+    }
+
+    if max_velocity < 1e-6 {
+        println!("⚠️  WARNING: Velocities near zero - system may be over-damped");
+    } else if max_velocity > 1e6 {
+        println!("⚠️  WARNING: Very high velocities - simulation may be unstable");
+    } else {
+        println!("✓ Velocities look reasonable");
+    }
+
+    Ok(())
+}
+
+/// Parse CLI arguments
+fn parse_args() -> (bool, usize, f32) {
+    let args: Vec<String> = std::env::args().collect();
+    let mut diagnose = false;
+    let mut steps = 1000;
+    let mut force = 5.0;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--diagnose" | "-d" => diagnose = true,
+            "-n" | "--steps" => {
+                i += 1;
+                if i < args.len() {
+                    steps = args[i].parse().unwrap_or(1000);
+                }
+            }
+            "-f" | "--force" => {
+                i += 1;
+                if i < args.len() {
+                    force = args[i].parse().unwrap_or(5.0);
+                }
+            }
+            "--help" | "-h" => {
+                println!("Cell Simulator X");
+                println!();
+                println!("Usage: cell-simulator-x [OPTIONS]");
+                println!();
+                println!("Options:");
+                println!("  --diagnose, -d     Run physics diagnostics (no GUI)");
+                println!("  -n, --steps N      Number of physics steps (default: 1000)");
+                println!("  -f, --force F      Force magnitude in μN (default: 5.0)");
+                println!("  --help, -h         Show this help");
+                std::process::exit(0);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    (diagnose, steps, force)
+}
+
 fn main() -> Result<()> {
     env_logger::init();
+
+    // Parse CLI arguments
+    let (diagnose, steps, force) = parse_args();
+
+    if diagnose {
+        return run_diagnostics(steps, force);
+    }
+
     log::info!("Cell Simulator X starting...");
 
     // Load parameters
@@ -41,7 +248,7 @@ fn main() -> Result<()> {
         dt_sec: 1e-5,           // 10 microsecond timestep
         temperature_K: 310.0,    // 37°C body temperature
         enable_thermal_noise: true,
-        membrane_damping: 0.5,   // Increased damping for stability
+        membrane_damping: 5.0,   // Damping for stable visualization
     };
     let mut physics_solver = PhysicsSolver::new(&cell_state.geometry.mesh, physics_config);
     log::info!("Physics solver initialized");
@@ -67,7 +274,6 @@ fn main() -> Result<()> {
 
     // Force application state
     let mut apply_force = false;
-    let mut force_vertex_idx: Option<usize> = None;
 
     log::info!("Controls:");
     log::info!("  Mouse drag: Orbit camera");
@@ -132,11 +338,13 @@ fn main() -> Result<()> {
                                     }
                                 }
                             }
-                            force_vertex_idx = Some(center_idx);
-                            log::info!("Applying force to vertex {}", center_idx);
+                            // Apply persistent force (large enough for visible deformation)
+                            let force = Vec3::new(0.0, 0.0, -100.0); // μN downward
+                            physics_solver.apply_external_force(&mut cell_state.physics, center_idx, force);
+                            log::info!("Applying {:.1} μN force to vertex {}", force.length(), center_idx);
                         } else {
-                            force_vertex_idx = None;
-                            log::info!("Force application stopped");
+                            physics_solver.clear_external_forces(&mut cell_state.physics);
+                            log::info!("Force cleared");
                         }
                     }
                     KeyCode::Equal | KeyCode::NumpadAdd => {
@@ -164,12 +372,7 @@ fn main() -> Result<()> {
                         let _frame_time = (now - last_physics_time).as_secs_f32();
                         last_physics_time = now;
 
-                        // Apply external force if enabled
-                        if let Some(idx) = force_vertex_idx {
-                            // Apply downward force to simulate micropipette aspiration
-                            let force = Vec3::new(0.0, 0.0, -0.001); // μN
-                            physics_solver.apply_external_force(&mut cell_state.physics, idx, force);
-                        }
+                        // External forces are now persistent (set via F key)
 
                         // Run physics substeps
                         for _ in 0..physics_substeps {

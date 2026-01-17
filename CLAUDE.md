@@ -18,8 +18,32 @@ cargo bench              # Run benchmarks
 cargo check              # Fast type checking
 cargo clippy             # Lint
 cargo fmt                # Format code
-cargo run                # Run simulator
+cargo run                # Run simulator (GUI)
+cargo run -- --diagnose  # Run physics diagnostics (CLI, no GUI)
+cargo run -- --diagnose -n 5000 -f 50.0  # Custom steps and force
 ```
+
+## CLI Diagnostics Mode
+
+The simulator includes a headless diagnostics mode for testing physics without the GUI:
+
+```bash
+cargo run -- --diagnose [OPTIONS]
+
+Options:
+  --diagnose, -d     Run physics diagnostics (no GUI)
+  -n, --steps N      Number of physics steps (default: 1000)
+  -f, --force F      Force magnitude in μN (default: 5.0)
+  --help, -h         Show help
+```
+
+This mode:
+- Applies a downward force to the center vertex (simulating micropipette)
+- Reports displacement, velocity, and energy statistics
+- Includes diagnostic checks for common physics issues
+- Runs without GPU/rendering for fast iteration
+
+**Testing Requirement**: All new physics/mechanics features should be validated via CLI diagnostics before GUI testing.
 
 ## Code Conventions
 
@@ -113,3 +137,18 @@ src/physics/
 | ATP concentration | 1.5-2.5 mM |
 | Membrane shear modulus | 5.5 μN/m |
 | Simulation speed | >10 fps |
+
+## Development Workflow
+
+**IMPORTANT**: Claude Code should validate all features via CLI before asking the user to test in the GUI.
+
+1. **Implementation**: Write code for new feature
+2. **Unit Tests**: Add tests in `tests/` directory
+3. **CLI Validation**: Test physics/mechanics via `cargo run -- --diagnose`
+4. **GUI Testing**: Only after CLI validation passes, user tests in GUI
+
+This workflow ensures:
+- Faster iteration (no GPU/rendering overhead)
+- Reproducible diagnostics with exact numbers
+- Clear error identification via console output
+- User time is not wasted on broken features

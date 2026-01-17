@@ -66,6 +66,9 @@ impl VelocityVerlet {
     ///
     /// v(t + dt/2) = v(t) + (dt/2) * a(t)
     /// where a = F/m
+    ///
+    /// Units: Force (μN), mass (ng for consistent dynamics), time (s), velocity (μm/s)
+    /// With F=1μN, m=1ng, dt=1e-5s: Δv = F/m * dt = 1e-6/(1e-12) * 1e-5 = 1e1 μm/s
     pub fn half_step_velocity(
         &mut self,
         velocities: &mut [Vec3],
@@ -74,9 +77,15 @@ impl VelocityVerlet {
     ) {
         let mass = self.vertex_mass_pg;
         let half_dt = dt / 2.0;
+        // Effective unit conversion for stable dynamics
+        // F[μN]/m[pg] needs scaling to give reasonable μm/s² accelerations
+        // Target: with F=100μN, get a~1000 μm/s² for visible but stable motion
+        // a = (F/m) * accel_scale = (100/1) * accel_scale = 1000
+        // => accel_scale = 10
+        let accel_scale = 10.0_f32;
 
         for (vel, force) in velocities.iter_mut().zip(forces.iter()) {
-            let accel = *force / mass;
+            let accel = (*force / mass) * accel_scale;
             *vel += accel * half_dt;
 
             // Clamp velocity for stability
