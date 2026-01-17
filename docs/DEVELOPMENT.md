@@ -112,10 +112,22 @@ Ion Homeostasis:
 | Malaria (5%) | Lactate elevation | >baseline | Elevated | ✅ |
 | Sickle (HbSS) | P50 | 31 mmHg | 31.0 mmHg | ✅ |
 
-### Phase 8: (Next)
-- Full mechano-metabolic coupling
-- Volume regulation feedback
-- Documentation and polish
+### Phase 8: Mechano-Metabolic Coupling ✅
+- **TensionComputer**: Global membrane tension from Skalak strain invariants (I₁, I₂)
+- **SpectrinModulator**: ATP depletion → spectrin stiffness (1.0-1.5× modifier)
+- **CoupledSolver**: Synchronized physics (1μs) + biochemistry (1ms) timesteps
+- **Bidirectional Coupling**:
+  - Forward: Tension → Piezo1 → Ca²⁺ → ATP dynamics
+  - Reverse: ATP depletion → spectrin stiffening → membrane mechanics
+- **CLI Integration**: `--diagnose-coupled` with tension override
+
+**Phase 8 Verified Results (60s simulation)**:
+| Metric | At Rest | Under Tension (3 pN/nm) | Status |
+|--------|---------|------------------------|--------|
+| Tension | ~0 pN/nm | 3.0 pN/nm | ✅ |
+| Piezo1 P_open | ~0% | 83.5% | ✅ |
+| Stiffness modifier (normal ATP) | 1.0 | 1.0 | ✅ |
+| Stiffness modifier (low ATP) | 1.375 | - | ✅ |
 
 ## Module Structure
 
@@ -142,6 +154,11 @@ src/
 │       ├── diabetic.rs      # Hyperglycemia effects
 │       ├── malaria.rs       # P. falciparum infection
 │       └── sickle_cell.rs   # HbS polymerization
+├── coupling/       # Mechano-metabolic coupling (Phase 8)
+│   ├── mod.rs               # Module exports
+│   ├── coupled_solver.rs    # CoupledSolver orchestrator
+│   ├── tension_computer.rs  # Membrane tension from strain
+│   └── spectrin_modulator.rs # ATP → spectrin stiffness
 ├── render/         # WebGPU/Metal rendering
 ├── config/         # Parameters, JSON loading
 └── state/          # Cell state management
@@ -225,6 +242,21 @@ cargo run -- --diagnose-disease sickle --disease-param 1.0 --po2 40  # HbSS at l
 - Disease-specific modifications to solver config
 - Time-dependent effects (storage aging, polymerization)
 - Validates against literature targets for each disease
+
+### Coupled Mechano-Metabolic Diagnostics (Phase 8)
+```bash
+cargo run -- --diagnose-coupled                    # Default: 60s, no tension
+cargo run -- --diagnose-coupled --tension 2.0      # Apply 2 pN/nm membrane tension
+cargo run -- --diagnose-coupled --tension 3.0 -d 120  # Higher tension, longer duration
+cargo run -- --diagnose-coupled --physics-substeps 500  # Custom physics substeps
+
+# Combined with disease models
+cargo run -- --diagnose-disease storage --disease-param 42 --diagnose-coupled
+```
+- CoupledSolver: 1000 physics steps (1μs each) per biochemistry step (1ms)
+- Forward coupling: Tension → Piezo1 activation → Ca²⁺ influx
+- Reverse coupling: ATP depletion → spectrin stiffening (1.0-1.5×)
+- Reports: Tension (pN/nm), Piezo1 P_open, Ca²⁺, ATP, stiffness modifier
 
 ## GUI Controls
 

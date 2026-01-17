@@ -113,6 +113,7 @@ impl RedoxSolver {
     }
 
     /// Compute all redox derivatives
+    #[allow(dead_code)] // Available for future direct derivative computation
     fn compute_derivatives(&self, metabolites: &MetabolitePool, dydt: &mut [f64]) {
         // PPP (G6P -> NADPH)
         self.ppp.compute_derivatives(metabolites, dydt);

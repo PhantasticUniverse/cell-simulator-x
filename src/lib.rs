@@ -9,6 +9,7 @@
 
 pub mod biochemistry;
 pub mod config;
+pub mod coupling;
 pub mod geometry;
 pub mod physics;
 pub mod render;
@@ -40,6 +41,8 @@ pub use biochemistry::{
     SickleCellModel, SickleCellConfig,
 };
 pub use config::Parameters;
+// Phase 8: Mechano-Metabolic Coupling
+pub use coupling::{CoupledSolver, CoupledConfig, CoupledDiagnostics, TensionComputer, SpectrinModulator};
 pub use geometry::{Mesh, SpectrinNetwork};
 pub use physics::{PhysicsConfig, PhysicsSolver};
 pub use render::{Camera, RenderState};

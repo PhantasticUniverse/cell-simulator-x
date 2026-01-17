@@ -519,7 +519,32 @@ struct EnvironmentState {
 - Malaria: Glucose consumption 0.5 mM/s, lactate production 1.0 mM/s (Roth 1990, Sherman 1979)
 - Sickle Cell: P50 shift 26.8→31 mmHg (Eaton 1987), polymerization threshold 35% saturation
 
-### Phase 8: Polish & Release (Months 21-24)
+### Phase 8: Mechano-Metabolic Coupling (Months 21-22) ✅ COMPLETE
+**Goal**: Bidirectional physics-biochemistry coupling
+
+- [x] TensionComputer: Global membrane tension from Skalak strain invariants
+- [x] SpectrinModulator: ATP → spectrin stiffness (1.0-1.5× modifier)
+- [x] CoupledSolver: Synchronized timesteps (1000 physics per biochem)
+- [x] Forward coupling: Tension → Piezo1 → Ca²⁺ influx
+- [x] Reverse coupling: ATP depletion → spectrin stiffening
+- [x] CLI integration (--diagnose-coupled)
+- [x] Integration tests (14 coupling tests)
+
+**Deliverable**: First fully integrated mechano-metabolic cell simulation ✅
+
+**Verified Results (60s simulation)**:
+| Metric | At Rest | Under Tension (3 pN/nm) | Status |
+|--------|---------|------------------------|--------|
+| Tension | ~0 pN/nm | 3.0 pN/nm | ✅ |
+| Piezo1 P_open | ~0% | 83.5% | ✅ |
+| Stiffness modifier | 1.0 | 1.0 | ✅ |
+
+**Implementation Details**:
+- TensionComputer: T = Gs × (|I₁| + |I₂|) / 2, temporal averaging
+- SpectrinModulator: modifier = 1.0 + 0.5 × (1.0 - ATP/2.0)
+- CoupledSolver: 1μs physics, 1ms biochemistry, tension→Piezo1 coupling
+
+### Phase 9: Polish & Release (Months 23-24)
 **Goal**: Production-ready software
 
 - [ ] Comprehensive documentation
@@ -650,6 +675,11 @@ cell-simulator-x/
 │   │       ├── diabetic.rs      # Hyperglycemia effects
 │   │       ├── malaria.rs       # P. falciparum infection
 │   │       └── sickle_cell.rs   # HbS polymerization
+│   ├── coupling/                # ✅ Implemented (Phase 8)
+│   │   ├── mod.rs               # Module exports
+│   │   ├── coupled_solver.rs    # CoupledSolver orchestrator
+│   │   ├── tension_computer.rs  # Membrane tension from strain
+│   │   └── spectrin_modulator.rs # ATP → spectrin stiffness
 │   └── compute/                 # 📋 Planned (GPU acceleration)
 │       ├── mod.rs
 │       └── metal.rs
@@ -664,7 +694,8 @@ cell-simulator-x/
 │   ├── integration_tests.rs     # ✅ Phase 5 integration (11 tests)
 │   ├── redox_tests.rs           # ✅ Phase 6a redox validation (16 tests)
 │   ├── ion_tests.rs             # ✅ Phase 6b ion homeostasis (9 tests)
-│   └── disease_tests.rs         # ✅ Phase 7 disease models (21 tests)
+│   ├── disease_tests.rs         # ✅ Phase 7 disease models (21 tests)
+│   └── coupling_tests.rs        # ✅ Phase 8 coupling validation (14 tests)
 └── benches/
     └── geometry.rs              # Geometry benchmarks
 ```
@@ -700,11 +731,17 @@ cell-simulator-x/
 3. ~~**Malaria** (P. falciparum metabolic takeover)~~ ✅
 4. ~~**Sickle cell** (HbS polymerization)~~ ✅
 
-**Next: Phase 8 - Polish & Release**
-1. Full mechano-metabolic coupling (deformation → ATP release)
-2. Volume regulation feedback
-3. Comprehensive documentation
-4. User interface refinement
+**✅ Phase 8 - Mechano-Metabolic Coupling COMPLETE**
+1. ~~**TensionComputer** - membrane tension from strain invariants~~ ✅
+2. ~~**SpectrinModulator** - ATP → spectrin stiffness~~ ✅
+3. ~~**CoupledSolver** - synchronized physics + biochemistry~~ ✅
+4. ~~**Bidirectional coupling** - tension↔metabolism feedback~~ ✅
+
+**Next: Phase 9 - Polish & Release**
+1. Comprehensive documentation
+2. User interface refinement
+3. Volume regulation feedback (optional)
+4. Publication of methods paper
 
 ---
 

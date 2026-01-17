@@ -17,6 +17,8 @@ cargo run -- --diagnose-disease storage --disease-param 21    # Storage lesion (
 cargo run -- --diagnose-disease diabetic --disease-param 12   # Diabetic (12 mM glucose)
 cargo run -- --diagnose-disease malaria --disease-param 0.05  # Malaria (5% parasitemia)
 cargo run -- --diagnose-disease sickle --disease-param 1.0    # Sickle cell (HbSS)
+cargo run -- --diagnose-coupled -d 60                          # Mechano-metabolic coupling
+cargo run -- --diagnose-coupled --tension 2.0 -d 60            # With tension override
 cargo run -- --help                  # Full CLI options
 ```
 
@@ -34,6 +36,7 @@ cargo run -- --help                  # Full CLI options
 | `physics` | Membrane mechanics, DPD, WLC |
 | `biochemistry` | Glycolysis, PPP, glutathione, hemoglobin, pH buffer, ion homeostasis, full integration |
 | `biochemistry/disease` | Disease models: storage lesion, diabetic, malaria, sickle cell |
+| `coupling` | Mechano-metabolic coupling: TensionComputer, SpectrinModulator, CoupledSolver |
 
 ## Current Status
 
@@ -45,6 +48,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 6a: Redox Metabolism ✅ (PPP, Glutathione, Piezo1)
 - Phase 6b: Ion Homeostasis ✅ (Na+/K+-ATPase, PMCA)
 - Phase 7: Disease Models ✅ (Storage Lesion, Diabetic, Malaria, Sickle Cell)
+- Phase 8: Mechano-Metabolic Coupling ✅ (TensionComputer, SpectrinModulator, CoupledSolver)
 
 ## Development
 

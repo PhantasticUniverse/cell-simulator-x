@@ -33,7 +33,9 @@ use cell_simulator_x::{
     FullyIntegratedSolver, FullyIntegratedConfig,
     run_full_integration_diagnostics,
     // Phase 7: Disease models
-    DiseaseRegistry, DiseaseModel,
+    DiseaseRegistry,
+    // Phase 8: Mechano-metabolic coupling
+    CoupledSolver, CoupledConfig, CoupledDiagnostics,
 };
 use glam::Vec3;
 use winit::{
@@ -202,6 +204,7 @@ struct CliArgs {
     diagnose_integrated: bool,
     diagnose_redox: bool,
     diagnose_full: bool,
+    diagnose_coupled: bool,
     diagnose_disease: Option<String>,
     disease_param: f64,
     steps: usize,
@@ -219,6 +222,8 @@ struct CliArgs {
     // Redox diagnostics parameters
     oxidative_stress: f64,
     membrane_tension: f64,
+    // Coupled diagnostics parameters
+    physics_substeps: usize,
 }
 
 impl Default for CliArgs {
@@ -230,6 +235,7 @@ impl Default for CliArgs {
             diagnose_integrated: false,
             diagnose_redox: false,
             diagnose_full: false,
+            diagnose_coupled: false,
             diagnose_disease: None,
             disease_param: 0.0,
             steps: 1000,
@@ -244,6 +250,7 @@ impl Default for CliArgs {
             atp_stress: 1.0,     // Default normal ATP consumption
             oxidative_stress: 1.0,  // Normal (no extra stress)
             membrane_tension: 0.0,  // No tension at rest
+            physics_substeps: 100,   // Reduced for faster diagnostics
         }
     }
 }
@@ -262,6 +269,7 @@ fn parse_args() -> CliArgs {
             "--diagnose-integrated" => cli.diagnose_integrated = true,
             "--diagnose-redox" => cli.diagnose_redox = true,
             "--diagnose-full" => cli.diagnose_full = true,
+            "--diagnose-coupled" => cli.diagnose_coupled = true,
             "--diagnose-disease" => {
                 i += 1;
                 if i < args.len() {
@@ -346,6 +354,12 @@ fn parse_args() -> CliArgs {
                     cli.membrane_tension = args[i].parse().unwrap_or(0.0);
                 }
             }
+            "--physics-substeps" => {
+                i += 1;
+                if i < args.len() {
+                    cli.physics_substeps = args[i].parse().unwrap_or(100);
+                }
+            }
             "--help" | "-h" => {
                 println!("Cell Simulator X");
                 println!();
@@ -358,6 +372,7 @@ fn parse_args() -> CliArgs {
                 println!("  --diagnose-integrated  Run integrated metabolism-oxygen diagnostics (no GUI)");
                 println!("  --diagnose-redox       Run redox/antioxidant diagnostics (no GUI)");
                 println!("  --diagnose-full        Run fully integrated diagnostics (glycolysis+PPP+Hb) (no GUI)");
+                println!("  --diagnose-coupled     Run mechano-metabolic coupling diagnostics (no GUI)");
                 println!("  --diagnose-disease D   Run disease model diagnostics (storage|diabetic|malaria|sickle)");
                 println!("  -n, --steps N          Number of physics steps (default: 1000)");
                 println!("  -f, --force F          Force magnitude in μN (default: 5.0)");
@@ -383,7 +398,15 @@ fn parse_args() -> CliArgs {
                 println!("                           malaria: parasitemia fraction (0.01-0.10)");
                 println!("                           sickle: HbS fraction (0-1.0)");
                 println!();
+                println!("Coupled diagnostics options:");
+                println!("  --tension T            Membrane tension override in pN/nm (default: 0.0 = computed)");
+                println!("  --physics-substeps N   Physics substeps per biochem step (default: 100)");
+                println!();
                 println!("  --help, -h             Show this help");
+                println!();
+                println!("Coupled diagnostics examples:");
+                println!("  cargo run -- --diagnose-coupled -d 60");
+                println!("  cargo run -- --diagnose-coupled --tension 2.0 -d 60");
                 println!();
                 println!("Disease model examples:");
                 println!("  cargo run -- --diagnose-disease storage --disease-param 21 -d 60");
@@ -928,6 +951,154 @@ fn run_disease_diagnostics(
     Ok(())
 }
 
+/// Run mechano-metabolic coupling diagnostics without GUI
+fn run_coupled_diagnostics(
+    duration_sec: f64,
+    tension_override: f64,
+    physics_substeps: usize,
+    po2_mmHg: f64,
+    oxidative_stress: f64,
+) -> Result<()> {
+    use cell_simulator_x::config::GeometryParameters;
+    use cell_simulator_x::geometry::{Mesh, SpectrinNetwork};
+    use cell_simulator_x::state::PhysicsState;
+
+    println!("=== Cell Simulator X - Mechano-Metabolic Coupling Diagnostics ===\n");
+
+    // Create geometry
+    let params = GeometryParameters {
+        cell_radius_um: 3.91,
+        fung_tong_c0_um: 0.81,
+        fung_tong_c2_um: 7.83,
+        fung_tong_c4_um: -4.39,
+        mesh_resolution: 16, // Moderate resolution for diagnostics
+        spectrin_target_count: 500,
+    };
+    let mesh = Mesh::generate_rbc(&params);
+    let spectrin = SpectrinNetwork::generate(&mesh, &params);
+    let mut mesh = mesh;  // Make mutable for physics
+    let mut physics_state = PhysicsState::new(mesh.vertices.len());
+
+    // Create coupled solver config
+    let config = CoupledConfig {
+        physics_substeps,
+        enable_tension_coupling: tension_override == 0.0,  // Use computed tension if no override
+        enable_atp_stiffness_coupling: true,
+        po2_mmHg,
+        oxidative_stress_multiplier: oxidative_stress,
+        ..Default::default()
+    };
+
+    // Create coupled solver
+    let mut solver = CoupledSolver::new(&mesh, config.clone());
+
+    // Create metabolite pool
+    let mut metabolites = MetabolitePool::default_fully_integrated();
+
+    // Apply tension override if specified
+    if tension_override > 0.0 {
+        solver.set_tension_override(tension_override);
+        println!("Tension Override: {:.1} pN/nm (Piezo1 driven by override)", tension_override);
+    } else {
+        println!("Tension: Computed from physics (Skalak strain invariants)");
+    }
+
+    println!("Physics substeps: {} per biochemistry step", physics_substeps);
+    println!("pO2: {:.0} mmHg", po2_mmHg);
+    println!("Oxidative stress: {:.1}x", oxidative_stress);
+    println!();
+
+    // Initial state
+    let initial_diag = solver.diagnostics(&metabolites);
+    println!("Initial State:");
+    println!("  ATP:                {:.3} mM", initial_diag.atp_mM);
+    println!("  Ca²⁺ (cytosolic):   {:.0} nM", initial_diag.ca_cytosolic_uM * 1000.0);
+    println!("  Stiffness modifier: {:.3}x", initial_diag.stiffness_modifier);
+    println!("  Membrane tension:   {:.3} pN/nm", initial_diag.membrane_tension_pN_per_nm);
+    println!();
+
+    // Time series
+    println!("--- Running {:.1} second simulation ---\n", duration_sec);
+    CoupledDiagnostics::print_row_header();
+
+    let start = Instant::now();
+    let report_interval = duration_sec / 10.0;
+    let mut next_report = 0.0;
+
+    let n_steps = (duration_sec / solver.config.biochem_dt_sec).ceil() as usize;
+
+    for step in 0..n_steps {
+        let t = step as f64 * solver.config.biochem_dt_sec;
+
+        if t >= next_report {
+            let diag = solver.diagnostics(&metabolites);
+            diag.print_row();
+            next_report += report_interval;
+        }
+
+        // Apply tension override each step if needed
+        if tension_override > 0.0 {
+            solver.set_tension_override(tension_override);
+        }
+
+        solver.step(&mut mesh, &spectrin, &mut physics_state, &mut metabolites);
+    }
+
+    // Final row
+    let final_diag = solver.diagnostics(&metabolites);
+    final_diag.print_row();
+
+    let elapsed = start.elapsed();
+
+    // Final summary
+    println!();
+    final_diag.print_summary();
+
+    // Coupling validation
+    println!("\n=== Coupling Validation ===\n");
+
+    // Check tension → Piezo1 coupling
+    if tension_override > 0.0 {
+        let ca_nM = final_diag.ca_cytosolic_uM * 1000.0;
+        if ca_nM > 100.0 {
+            println!("Tension → Ca²⁺: Applied tension activated Piezo1 (Ca²⁺ = {:.0} nM)", ca_nM);
+        } else {
+            println!("Tension → Ca²⁺: Minimal Piezo1 activation (Ca²⁺ = {:.0} nM)", ca_nM);
+        }
+    } else {
+        println!("Tension → Ca²⁺: Computing tension from physics (no override)");
+    }
+
+    // Check ATP → stiffness coupling
+    if final_diag.atp_mM < 1.5 {
+        println!(
+            "ATP → Stiffness: Low ATP ({:.2} mM) → stiffness modifier = {:.2}x ({})",
+            final_diag.atp_mM,
+            final_diag.stiffness_modifier,
+            final_diag.stiffness_status
+        );
+    } else {
+        println!(
+            "ATP → Stiffness: Normal ATP ({:.2} mM) → stiffness modifier = {:.2}x ({})",
+            final_diag.atp_mM,
+            final_diag.stiffness_modifier,
+            final_diag.stiffness_status
+        );
+    }
+
+    // Performance
+    println!();
+    println!("=== Performance ===");
+    println!("Wall clock time: {:.2?}", elapsed);
+    println!("Simulation time: {:.2} s", solver.time_sec);
+    println!("Biochem steps: {}", n_steps);
+    println!("Physics steps: {}", n_steps * physics_substeps);
+    println!("Biochem steps/second: {:.0}", n_steps as f32 / elapsed.as_secs_f32());
+    println!("Physics steps/second: {:.0}", (n_steps * physics_substeps) as f32 / elapsed.as_secs_f32());
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -971,6 +1142,16 @@ fn main() -> Result<()> {
             cli.disease_param,
             cli.duration_sec,
             cli.po2_mmHg,
+        );
+    }
+
+    if cli.diagnose_coupled {
+        return run_coupled_diagnostics(
+            cli.duration_sec,
+            cli.membrane_tension,
+            cli.physics_substeps,
+            cli.po2_mmHg,
+            cli.oxidative_stress,
         );
     }
 

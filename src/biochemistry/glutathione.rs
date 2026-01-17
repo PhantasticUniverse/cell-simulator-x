@@ -48,6 +48,7 @@ pub struct GlutathionePeroxidase {
     pub km_h2o2_mM: f64,
     stoichiometry: ReactionStoichiometry,
     idx_gsh: usize,
+    #[allow(dead_code)] // Stored for potential future use in diagnostics
     idx_gssg: usize,
     idx_h2o2: usize,
 }
@@ -120,8 +121,10 @@ pub struct GlutathioneReductase {
     pub km_nadph_mM: f64,
     stoichiometry: ReactionStoichiometry,
     idx_gssg: usize,
+    #[allow(dead_code)] // Stored for potential future use in diagnostics
     idx_gsh: usize,
     idx_nadph: usize,
+    #[allow(dead_code)] // Stored for potential future use in diagnostics
     idx_nadp: usize,
 }
 
@@ -192,7 +195,9 @@ pub struct GammaGlutamylcysteineSynthetase {
     idx_glu: usize,
     idx_cys: usize,
     idx_atp: usize,
+    #[allow(dead_code)] // Stored for potential future use in diagnostics
     idx_adp: usize,
+    #[allow(dead_code)] // Stored for potential future use in diagnostics
     idx_gamma_glu_cys: usize,
     idx_gsh: usize,
 }
@@ -273,7 +278,9 @@ pub struct GlutathioneSynthetase {
     idx_gamma_glu_cys: usize,
     idx_gly: usize,
     idx_atp: usize,
+    #[allow(dead_code)] // Stored for potential future use in diagnostics
     idx_adp: usize,
+    #[allow(dead_code)] // Stored for potential future use in diagnostics
     idx_gsh: usize,
 }
 

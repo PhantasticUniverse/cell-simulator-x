@@ -128,7 +128,7 @@ impl FullyIntegratedSolver {
         let ion_homeostasis = IonHomeostasisSystem::with_config(
             &indices.glycolysis,
             &indices.redox,
-            35,  // Ion indices start at 35
+            indices.ions.na_plus_cytosolic,  // Ion indices start at first ion index
             IonHomeostasisConfig::default(),
         );
         let hemoglobin = HemoglobinSolver::default();
