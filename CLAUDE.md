@@ -21,29 +21,48 @@ cargo fmt                # Format code
 cargo run                # Run simulator (GUI)
 cargo run -- --diagnose  # Run physics diagnostics (CLI, no GUI)
 cargo run -- --diagnose -n 5000 -f 50.0  # Custom steps and force
+cargo run -- --diagnose-metabolism       # Run metabolism diagnostics (CLI, no GUI)
+cargo run -- --diagnose-metabolism -d 30.0  # Custom duration (seconds)
 ```
 
 ## CLI Diagnostics Mode
 
-The simulator includes a headless diagnostics mode for testing physics without the GUI:
+The simulator includes headless diagnostics modes for testing without the GUI:
 
+### Physics Diagnostics
 ```bash
 cargo run -- --diagnose [OPTIONS]
 
 Options:
-  --diagnose, -d     Run physics diagnostics (no GUI)
-  -n, --steps N      Number of physics steps (default: 1000)
-  -f, --force F      Force magnitude in μN (default: 5.0)
-  --help, -h         Show help
+  --diagnose           Run physics diagnostics (no GUI)
+  -n, --steps N        Number of physics steps (default: 1000)
+  -f, --force F        Force magnitude in μN (default: 5.0)
+  --help, -h           Show help
 ```
 
 This mode:
 - Applies a downward force to the center vertex (simulating micropipette)
 - Reports displacement, velocity, and energy statistics
 - Includes diagnostic checks for common physics issues
-- Runs without GPU/rendering for fast iteration
 
-**Testing Requirement**: All new physics/mechanics features should be validated via CLI diagnostics before GUI testing.
+### Metabolism Diagnostics
+```bash
+cargo run -- --diagnose-metabolism [OPTIONS]
+
+Options:
+  --diagnose-metabolism  Run metabolism diagnostics (no GUI)
+  -d, --duration D       Duration in seconds (default: 60.0)
+  --glucose-step G       Apply glucose step change at 50% duration
+  --help, -h             Show help
+```
+
+This mode:
+- Runs glycolysis and Rapoport-Luebering shunt simulation
+- Reports ATP, 2,3-DPG, glucose, lactate concentrations over time
+- Validates against physiological targets
+- Tests perturbation response (glucose step)
+
+**Testing Requirement**: All new features should be validated via CLI diagnostics before GUI testing.
 
 ## Code Conventions
 
@@ -125,9 +144,19 @@ src/physics/
 - **+/- keys**: Adjust physics substeps per frame
 - **Escape**: Exit
 
+---
+
+**Phase 3: Core Metabolism** - ✅ COMPLETE
+
+### Phase 3 Features
+- RK4 ODE integrator with stability controls
+- Enzyme kinetics framework (Michaelis-Menten, Hill, reversible)
+- Glycolysis pathway (11 enzymes)
+- Rapoport-Luebering shunt (2,3-DPG regulation)
+- Validated: ATP 1.5-2.5 mM, 2,3-DPG 4.5-5.5 mM, P50 ~27 mmHg
+
 ### Next Phase
-**Phase 3: Core Metabolism** - ODE solver and glycolysis implementation
-- See PRD.md Section 7 for detailed phase checklist
+**Phase 4: Oxygen Transport** - Hemoglobin binding and O2 dynamics
 
 ## Critical Validation Targets
 

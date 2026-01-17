@@ -1,0 +1,146 @@
+{
+  "_description": "Glycolysis enzyme kinetic parameters for human red blood cells",
+  "_citations": {
+    "general_model": "Rapoport TA, Heinrich R, Jacobasch G, Rapoport S. A linear steady-state treatment of enzymatic chains. General properties, control and effector strength. Eur J Biochem. 1974;42(1):107-120",
+    "rbc_glycolysis": "Rapoport TA, Heinrich R, Rapoport SM. The regulatory principles of glycolysis in erythrocytes in vivo and in vitro. A minimal comprehensive model describing steady states, quasi-steady states and time-dependent processes. Biochem J. 1976;154(2):449-469",
+    "detailed_kinetics": "Joshi A, Palsson BO. Metabolic dynamics in the human red cell. Part I-A comprehensive kinetic model. J Theor Biol. 1989;141(4):515-528",
+    "mulquiney_model": "Mulquiney PJ, Kuchel PW. Model of 2,3-bisphosphoglycerate metabolism in the human erythrocyte based on detailed enzyme kinetic equations: computer simulation and metabolic control analysis. Biochem J. 1999;342(Pt 3):567-580",
+    "enzyme_database": "Schomburg I, Chang A, Ebeling C, et al. BRENDA, the enzyme database: updates and major new developments. Nucleic Acids Res. 2004;32(Database issue):D431-D433"
+  },
+  "_units": {
+    "vmax": "mM/s (millimolar per second)",
+    "km": "mM (millimolar)",
+    "ki": "mM (millimolar)",
+    "keq": "dimensionless or mM (see individual reactions)"
+  },
+  "_temperature": "37°C (310 K)",
+  "_ph": "7.2 (intracellular RBC pH)",
+
+  "hexokinase": {
+    "_ec": "2.7.1.1",
+    "_reaction": "Glucose + ATP → Glucose-6-P + ADP",
+    "_citation": "Rapoport 1976; Joshi-Palsson 1989",
+    "vmax_mM_per_sec": 0.033,
+    "km_glucose_mM": 0.1,
+    "km_atp_mM": 1.0,
+    "ki_g6p_mM": 0.5,
+    "_notes": "Rate-limiting step; product inhibition by G6P is critical for regulation"
+  },
+
+  "glucose_6_phosphate_isomerase": {
+    "_ec": "5.3.1.9",
+    "_reaction": "Glucose-6-P ⇌ Fructose-6-P",
+    "_citation": "Rapoport 1976",
+    "vmax_forward_mM_per_sec": 1.0,
+    "vmax_reverse_mM_per_sec": 2.5,
+    "km_g6p_mM": 0.5,
+    "km_f6p_mM": 0.1,
+    "keq": 0.4,
+    "_notes": "Near-equilibrium reaction"
+  },
+
+  "phosphofructokinase": {
+    "_ec": "2.7.1.11",
+    "_reaction": "Fructose-6-P + ATP → Fructose-1,6-bisP + ADP",
+    "_citation": "Rapoport 1976; Joshi-Palsson 1989",
+    "vmax_mM_per_sec": 0.2,
+    "k_half_f6p_mM": 0.15,
+    "km_atp_mM": 0.1,
+    "hill_coefficient": 2.5,
+    "_notes": "Key regulatory enzyme; sigmoidal kinetics for F6P; activated by ADP/AMP, inhibited by ATP"
+  },
+
+  "aldolase": {
+    "_ec": "4.1.2.13",
+    "_reaction": "Fructose-1,6-bisP ⇌ DHAP + Glyceraldehyde-3-P",
+    "_citation": "Rapoport 1976",
+    "vmax_forward_mM_per_sec": 0.3,
+    "km_fbp_mM": 0.01,
+    "keq_mM": 7.8e-5,
+    "_notes": "Keq very unfavorable (in mM units); driven forward by rapid consumption of products"
+  },
+
+  "triose_phosphate_isomerase": {
+    "_ec": "5.3.1.1",
+    "_reaction": "DHAP ⇌ Glyceraldehyde-3-P",
+    "_citation": "Rapoport 1976",
+    "k_forward": 10.0,
+    "keq": 0.045,
+    "_notes": "Very fast equilibrating; near diffusion-limited enzyme"
+  },
+
+  "glyceraldehyde_3_phosphate_dehydrogenase": {
+    "_ec": "1.2.1.12",
+    "_reaction": "GAP + NAD+ + Pi ⇌ 1,3-BPG + NADH",
+    "_citation": "Mulquiney-Kuchel 1999",
+    "vmax_forward_mM_per_sec": 1.5,
+    "vmax_reverse_mM_per_sec": 0.5,
+    "km_gap_mM": 0.05,
+    "km_nad_mM": 0.05,
+    "km_pi_mM": 1.0,
+    "km_13bpg_mM": 0.001,
+    "km_nadh_mM": 0.01,
+    "_notes": "Key regulatory point; NAD/NADH ratio important"
+  },
+
+  "phosphoglycerate_kinase": {
+    "_ec": "2.7.2.3",
+    "_reaction": "1,3-BPG + ADP ⇌ 3-PG + ATP",
+    "_citation": "Rapoport 1976",
+    "vmax_forward_mM_per_sec": 5.0,
+    "vmax_reverse_mM_per_sec": 0.1,
+    "km_13bpg_mM": 0.002,
+    "km_adp_mM": 0.2,
+    "km_3pg_mM": 0.5,
+    "km_atp_mM": 0.5,
+    "_notes": "First ATP-generating step; strongly favors ATP production"
+  },
+
+  "phosphoglycerate_mutase": {
+    "_ec": "5.4.2.11",
+    "_reaction": "3-PG ⇌ 2-PG",
+    "_citation": "Rapoport 1976",
+    "vmax_forward_mM_per_sec": 2.0,
+    "vmax_reverse_mM_per_sec": 11.0,
+    "km_3pg_mM": 0.2,
+    "km_2pg_mM": 0.03,
+    "keq": 0.18,
+    "_notes": "Requires 2,3-BPG as cofactor; near equilibrium"
+  },
+
+  "enolase": {
+    "_ec": "4.2.1.11",
+    "_reaction": "2-PG ⇌ PEP + H2O",
+    "_citation": "Rapoport 1976",
+    "vmax_forward_mM_per_sec": 1.5,
+    "vmax_reverse_mM_per_sec": 3.0,
+    "km_2pg_mM": 0.05,
+    "km_pep_mM": 0.1,
+    "keq": 0.5,
+    "_notes": "Near equilibrium"
+  },
+
+  "pyruvate_kinase": {
+    "_ec": "2.7.1.40",
+    "_reaction": "PEP + ADP → Pyruvate + ATP",
+    "_citation": "Rapoport 1976; Joshi-Palsson 1989",
+    "vmax_mM_per_sec": 0.8,
+    "k_half_pep_mM": 0.2,
+    "km_adp_mM": 0.3,
+    "hill_coefficient": 2.0,
+    "_notes": "Second ATP-generating step; essentially irreversible; cooperative for PEP"
+  },
+
+  "lactate_dehydrogenase": {
+    "_ec": "1.1.1.27",
+    "_reaction": "Pyruvate + NADH ⇌ Lactate + NAD+",
+    "_citation": "Rapoport 1976",
+    "vmax_forward_mM_per_sec": 5.0,
+    "vmax_reverse_mM_per_sec": 0.01,
+    "km_pyruvate_mM": 0.2,
+    "km_nadh_mM": 0.01,
+    "km_lactate_mM": 10.0,
+    "km_nad_mM": 0.1,
+    "_notes": "Regenerates NAD+ for GAPDH; strongly favors lactate formation"
+  }
+}

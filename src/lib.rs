@@ -7,12 +7,17 @@
 // This follows the project convention of including units in names.
 #![allow(non_snake_case)]
 
+pub mod biochemistry;
 pub mod config;
 pub mod geometry;
 pub mod physics;
 pub mod render;
 pub mod state;
 
+pub use biochemistry::{
+    MetabolismSolver, MetabolismConfig, MetabolitePool, MetabolismDiagnostics,
+    ExtendedMetaboliteIndices,
+};
 pub use config::Parameters;
 pub use geometry::{Mesh, SpectrinNetwork};
 pub use physics::{PhysicsConfig, PhysicsSolver};

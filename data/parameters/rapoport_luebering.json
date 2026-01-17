@@ -1,0 +1,79 @@
+{
+  "_description": "Rapoport-Luebering shunt parameters for 2,3-BPG regulation in human red blood cells",
+  "_citations": {
+    "discovery": "Rose ZB, Liebowitz J. 2,3-diphosphoglycerate phosphatase from human erythrocytes. General properties and activation by anions. J Biol Chem. 1970;245(12):3232-3241",
+    "bpg_function": "Benesch R, Benesch RE. The effect of organic phosphates from the human erythrocyte on the allosteric properties of hemoglobin. Biochem Biophys Res Commun. 1967;26(2):162-167",
+    "bpg_nature": "Benesch R, Benesch RE. Intracellular organic phosphates as regulators of oxygen release by haemoglobin. Nature. 1969;221(5181):618-622",
+    "model": "Mulquiney PJ, Kuchel PW. Model of 2,3-bisphosphoglycerate metabolism in the human erythrocyte based on detailed enzyme kinetic equations. Biochem J. 1999;342(Pt 3):567-580",
+    "oxygen_affinity": "Bunn HF, Forget BG. Hemoglobin: Molecular, Genetic and Clinical Aspects. Philadelphia: WB Saunders; 1986"
+  },
+  "_units": {
+    "vmax": "mM/s (millimolar per second)",
+    "km": "mM (millimolar)",
+    "ki": "mM (millimolar)",
+    "concentration": "mM (millimolar)",
+    "p50": "mmHg (millimeters of mercury)"
+  },
+  "_temperature": "37°C (310 K)",
+  "_ph": "7.2 (intracellular RBC pH)",
+
+  "bisphosphoglycerate_mutase": {
+    "_ec": "5.4.2.4",
+    "_reaction": "1,3-BPG → 2,3-BPG",
+    "_citation": "Mulquiney-Kuchel 1999",
+    "_notes": "Diverts 1,3-BPG from ATP-generating PGK reaction; product-inhibited by 2,3-BPG",
+    "vmax_mM_per_sec": 0.045,
+    "km_13bpg_mM": 0.004,
+    "ki_23bpg_mM": 2.0
+  },
+
+  "bisphosphoglycerate_phosphatase": {
+    "_ec": "3.1.3.13",
+    "_reaction": "2,3-BPG → 3-PG + Pi",
+    "_citation": "Rose & Liebowitz 1970; Mulquiney-Kuchel 1999",
+    "_notes": "Slow enzyme; determines steady-state 2,3-BPG level; inhibited by Pi and 3-PG",
+    "vmax_mM_per_sec": 0.0015,
+    "km_23bpg_mM": 2.0,
+    "ki_pi_mM": 0.5,
+    "ki_3pg_mM": 1.0
+  },
+
+  "physiological_values": {
+    "_citation": "Benesch & Benesch 1969; Bunn & Forget 1986",
+    "normal_23bpg_mM": {
+      "value": 5.0,
+      "range": [4.5, 5.5],
+      "_notes": "Normal adult RBC concentration"
+    },
+    "normal_13bpg_mM": {
+      "value": 0.001,
+      "range": [0.0005, 0.002],
+      "_notes": "Very low due to rapid metabolism"
+    },
+    "shunt_ratio": {
+      "value": 0.2,
+      "_notes": "Approximately 20% of 1,3-BPG flows through shunt at steady state"
+    }
+  },
+
+  "oxygen_affinity": {
+    "_citation": "Benesch & Benesch 1969; Bunn & Forget 1986",
+    "_description": "Relationship between 2,3-BPG and hemoglobin oxygen affinity",
+    "base_p50_mmHg": 15.0,
+    "dpg_effect_mmHg_per_mM": 2.4,
+    "_notes": "P50 = base_p50 + dpg_effect * [2,3-BPG]. Normal [2,3-BPG] ~5 mM gives P50 ~27 mmHg",
+    "normal_p50_mmHg": {
+      "value": 26.8,
+      "range": [25.0, 28.0],
+      "_notes": "PRD target: 26.8 ± 1 mmHg"
+    }
+  },
+
+  "ph_regulation": {
+    "_citation": "Mulquiney-Kuchel 1999",
+    "_description": "pH effects on 2,3-BPG synthesis",
+    "normal_ph": 7.2,
+    "dpg_per_ph_unit_mM": 5.0,
+    "_notes": "Acidosis decreases 2,3-BPG (inhibits BPGM), alkalosis increases it"
+  }
+}

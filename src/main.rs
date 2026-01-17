@@ -3,9 +3,11 @@
 //! GPU-accelerated human red blood cell simulation engine.
 //!
 //! CLI Usage:
-//!   cargo run                    # Run interactive simulation
-//!   cargo run -- --diagnose      # Run physics diagnostics (no GUI)
+//!   cargo run                           # Run interactive simulation
+//!   cargo run -- --diagnose             # Run physics diagnostics (no GUI)
 //!   cargo run -- --diagnose -n 1000 -f 10.0  # Custom steps and force
+//!   cargo run -- --diagnose-metabolism  # Run metabolism diagnostics (no GUI)
+//!   cargo run -- --diagnose-metabolism -d 10.0  # 10 second simulation
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -16,6 +18,7 @@ use cell_simulator_x::{
     physics::{PhysicsConfig, PhysicsSolver},
     render::RenderState,
     state::CellState,
+    MetabolismSolver, MetabolismConfig, MetabolitePool,
 };
 use glam::Vec3;
 use winit::{
@@ -176,27 +179,61 @@ fn run_diagnostics(steps: usize, force_magnitude: f32) -> Result<()> {
     Ok(())
 }
 
+/// CLI arguments for the simulator
+struct CliArgs {
+    diagnose_physics: bool,
+    diagnose_metabolism: bool,
+    steps: usize,
+    force: f32,
+    duration_sec: f64,
+    glucose_step: Option<f64>,
+}
+
+impl Default for CliArgs {
+    fn default() -> Self {
+        Self {
+            diagnose_physics: false,
+            diagnose_metabolism: false,
+            steps: 1000,
+            force: 5.0,
+            duration_sec: 60.0,  // 60 seconds default for metabolism
+            glucose_step: None,
+        }
+    }
+}
+
 /// Parse CLI arguments
-fn parse_args() -> (bool, usize, f32) {
+fn parse_args() -> CliArgs {
     let args: Vec<String> = std::env::args().collect();
-    let mut diagnose = false;
-    let mut steps = 1000;
-    let mut force = 5.0;
+    let mut cli = CliArgs::default();
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--diagnose" | "-d" => diagnose = true,
+            "--diagnose" => cli.diagnose_physics = true,
+            "--diagnose-metabolism" => cli.diagnose_metabolism = true,
             "-n" | "--steps" => {
                 i += 1;
                 if i < args.len() {
-                    steps = args[i].parse().unwrap_or(1000);
+                    cli.steps = args[i].parse().unwrap_or(1000);
                 }
             }
             "-f" | "--force" => {
                 i += 1;
                 if i < args.len() {
-                    force = args[i].parse().unwrap_or(5.0);
+                    cli.force = args[i].parse().unwrap_or(5.0);
+                }
+            }
+            "-d" | "--duration" => {
+                i += 1;
+                if i < args.len() {
+                    cli.duration_sec = args[i].parse().unwrap_or(60.0);
+                }
+            }
+            "--glucose-step" => {
+                i += 1;
+                if i < args.len() {
+                    cli.glucose_step = Some(args[i].parse().unwrap_or(10.0));
                 }
             }
             "--help" | "-h" => {
@@ -205,10 +242,13 @@ fn parse_args() -> (bool, usize, f32) {
                 println!("Usage: cell-simulator-x [OPTIONS]");
                 println!();
                 println!("Options:");
-                println!("  --diagnose, -d     Run physics diagnostics (no GUI)");
-                println!("  -n, --steps N      Number of physics steps (default: 1000)");
-                println!("  -f, --force F      Force magnitude in μN (default: 5.0)");
-                println!("  --help, -h         Show this help");
+                println!("  --diagnose           Run physics diagnostics (no GUI)");
+                println!("  --diagnose-metabolism  Run metabolism diagnostics (no GUI)");
+                println!("  -n, --steps N        Number of physics steps (default: 1000)");
+                println!("  -f, --force F        Force magnitude in μN (default: 5.0)");
+                println!("  -d, --duration D     Duration in seconds for metabolism (default: 60.0)");
+                println!("  --glucose-step G     Apply glucose step change at 50% duration");
+                println!("  --help, -h           Show this help");
                 std::process::exit(0);
             }
             _ => {}
@@ -216,17 +256,143 @@ fn parse_args() -> (bool, usize, f32) {
         i += 1;
     }
 
-    (diagnose, steps, force)
+    cli
+}
+
+/// Run metabolism diagnostics without GUI
+fn run_metabolism_diagnostics(duration_sec: f64, glucose_step: Option<f64>) -> Result<()> {
+    println!("=== Cell Simulator X - Metabolism Diagnostics ===\n");
+
+    // Create metabolism solver
+    let config = MetabolismConfig::default();
+    let mut solver = MetabolismSolver::new(config);
+    let mut metabolites = MetabolitePool::default_physiological();
+
+    let indices = solver.indices;
+
+    println!("Initial State:");
+    println!("  ATP:      {:.3} mM", metabolites.get(indices.glycolysis.atp));
+    println!("  ADP:      {:.3} mM", metabolites.get(indices.glycolysis.adp));
+    println!("  2,3-DPG:  {:.3} mM", metabolites.get(indices.bisphosphoglycerate_2_3));
+    println!("  Glucose:  {:.3} mM", metabolites.get(indices.glycolysis.glucose));
+    println!("  Lactate:  {:.3} mM", metabolites.get(indices.glycolysis.lactate));
+    println!();
+
+    // ATP consumption rate (membrane pumps, etc.)
+    // Reference: ~0.001 mM/s baseline consumption
+    let atp_consumption = 0.001;
+
+    // Time points for reporting
+    let report_interval = duration_sec / 10.0;
+    let mut next_report = report_interval;
+    let step_time = if glucose_step.is_some() { duration_sec / 2.0 } else { f64::MAX };
+    let mut step_applied = false;
+
+    println!("--- Running {:.1} second simulation ---\n", duration_sec);
+    println!("{:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "Time(s)", "ATP", "ADP", "2,3-DPG", "Glucose", "Lactate");
+    println!("{:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "", "(mM)", "(mM)", "(mM)", "(mM)", "(mM)");
+    println!("{}", "-".repeat(56));
+
+    let start = Instant::now();
+
+    // Integration loop
+    let dt = solver.config.dt_sec;
+    let n_steps = (duration_sec / dt).ceil() as usize;
+
+    for step in 0..n_steps {
+        let t = step as f64 * dt;
+
+        // Apply glucose step if requested
+        if let Some(glucose_change) = glucose_step {
+            if t >= step_time && !step_applied {
+                let current_glc = metabolites.get(indices.glycolysis.glucose);
+                metabolites.set(indices.glycolysis.glucose, current_glc + glucose_change);
+                println!("\n*** Glucose step: +{:.1} mM at t={:.1}s ***\n", glucose_change, t);
+                step_applied = true;
+            }
+        }
+
+        // Integrate
+        solver.step(&mut metabolites, atp_consumption);
+
+        // Report at intervals
+        if t >= next_report || step == n_steps - 1 {
+            println!("{:8.2} {:8.3} {:8.3} {:8.3} {:8.3} {:8.3}",
+                solver.time_sec,
+                metabolites.get(indices.glycolysis.atp),
+                metabolites.get(indices.glycolysis.adp),
+                metabolites.get(indices.bisphosphoglycerate_2_3),
+                metabolites.get(indices.glycolysis.glucose),
+                metabolites.get(indices.glycolysis.lactate));
+            next_report += report_interval;
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    println!();
+    println!("=== Final Diagnostics ===\n");
+
+    let diag = solver.diagnostics(&metabolites);
+    diag.print_summary();
+    println!();
+    diag.print_rates();
+
+    // Validation checks
+    println!("\n=== Validation Checks ===\n");
+    let warnings = solver.validate_state(&metabolites);
+    if warnings.is_empty() {
+        println!("✓ All metabolite concentrations within physiological range");
+    } else {
+        for warning in &warnings {
+            println!("⚠️  {}", warning);
+        }
+    }
+
+    // Target validation
+    let atp = metabolites.get(indices.glycolysis.atp);
+    let dpg = metabolites.get(indices.bisphosphoglycerate_2_3);
+
+    println!();
+    if atp >= 1.5 && atp <= 2.5 {
+        println!("✓ ATP concentration in target range (1.5-2.5 mM): {:.3} mM", atp);
+    } else {
+        println!("✗ ATP concentration outside target range (1.5-2.5 mM): {:.3} mM", atp);
+    }
+
+    if dpg >= 4.5 && dpg <= 5.5 {
+        println!("✓ 2,3-DPG concentration in target range (4.5-5.5 mM): {:.3} mM", dpg);
+    } else if dpg >= 3.0 && dpg <= 7.0 {
+        println!("~ 2,3-DPG concentration acceptable (3.0-7.0 mM): {:.3} mM", dpg);
+    } else {
+        println!("✗ 2,3-DPG concentration outside acceptable range: {:.3} mM", dpg);
+    }
+
+    // Performance stats
+    println!();
+    println!("=== Performance ===");
+    println!("Wall clock time: {:.2?}", elapsed);
+    println!("Simulation time: {:.2} s", solver.time_sec);
+    println!("Steps: {}", n_steps);
+    println!("Steps/second: {:.0}", n_steps as f32 / elapsed.as_secs_f32());
+
+    Ok(())
 }
 
 fn main() -> Result<()> {
     env_logger::init();
 
     // Parse CLI arguments
-    let (diagnose, steps, force) = parse_args();
+    let cli = parse_args();
 
-    if diagnose {
-        return run_diagnostics(steps, force);
+    if cli.diagnose_physics {
+        return run_diagnostics(cli.steps, cli.force);
+    }
+
+    if cli.diagnose_metabolism {
+        return run_metabolism_diagnostics(cli.duration_sec, cli.glucose_step);
     }
 
     log::info!("Cell Simulator X starting...");
