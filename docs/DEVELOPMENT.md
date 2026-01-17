@@ -29,8 +29,15 @@
 - **Dynamic Kinetics**: O2 uptake/release with on/off rates
 - **Validated**: P50 26.8±1 mmHg, Hill n 2.7±0.1, Bohr -0.48±0.05
 
-### Phase 5: (Next)
-- Integration of oxygen transport with metabolism
+### Phase 5: Metabolism-Oxygen Integration ✅
+- **pH Buffer Model**: Van Slyke buffer capacity (~60 slykes), lactate → pH
+- **IntegratedSolver**: Couples MetabolismSolver + HemoglobinSolver + PhBufferModel
+- **Dynamic Coupling**: Lactate ↑ → pH ↓ → P50 ↑ → O2 release (Bohr effect)
+- **Validated**: pH sensitivity ~-0.017/mM lactate, Bohr effect coupling
+
+### Phase 6: (Next)
+- Extended biochemistry (PPP, glutathione)
+- Piezo1 mechanosensitive ATP release
 - Full cell simulation with coupled systems
 
 ## Module Structure
@@ -39,7 +46,13 @@
 src/
 ├── geometry/       # RBC mesh, spectrin network
 ├── physics/        # DPD, membrane mechanics, WLC, integrator
-├── biochemistry/   # Metabolism, enzyme kinetics
+├── biochemistry/   # Metabolism, enzyme kinetics, hemoglobin
+│   ├── enzyme.rs       # Enzyme kinetics framework
+│   ├── glycolysis.rs   # 11-enzyme glycolysis pathway
+│   ├── hemoglobin.rs   # Adair 4-site O2 binding
+│   ├── ph_buffer.rs    # Van Slyke buffer model
+│   ├── integration.rs  # IntegratedSolver (metabolism + O2)
+│   └── rapoport_luebering.rs  # 2,3-DPG shunt
 ├── render/         # WebGPU/Metal rendering
 ├── config/         # Parameters, JSON loading
 └── state/          # Cell state management
@@ -75,6 +88,17 @@ cargo run -- --diagnose-oxygen --temp 40     # Test temperature effect
 - Generates OEC (oxygen equilibrium curve)
 - Validates P50, Hill coefficient, Bohr coefficient
 
+### Integrated Metabolism-Oxygen
+```bash
+cargo run -- --diagnose-integrated           # Default: 60s, pO2=100 mmHg
+cargo run -- --diagnose-integrated --po2 40  # Venous conditions
+cargo run -- --diagnose-integrated --stress 5.0  # High ATP demand
+cargo run -- --diagnose-integrated -d 120    # Longer simulation
+```
+- Couples glycolysis → lactate → pH → Bohr effect → O2 affinity
+- Time-series: lactate, pH, P50, saturation
+- Validates coupling direction and magnitude
+
 ## GUI Controls
 
 | Key | Action |
@@ -98,6 +122,9 @@ cargo run -- --diagnose-oxygen --temp 40     # Test temperature effect
 | ATP | 1.5-2.5 mM | Beutler 1984 |
 | 2,3-DPG | 4.5-5.5 mM | Benesch 1969 |
 | Shear modulus | 5.5 μN/m | Evans 1977 |
+| pH at baseline lactate | 7.2 | Jacobs 1947 |
+| pH drop per mM lactate | ~0.017 | 1/60 slykes (Van Slyke 1922) |
+| Buffer capacity | ~60 slykes | Van Slyke 1922 |
 
 ## References
 

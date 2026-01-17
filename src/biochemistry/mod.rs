@@ -22,7 +22,9 @@
 pub mod enzyme;
 pub mod glycolysis;
 pub mod hemoglobin;
+pub mod integration;
 pub mod integrator;
+pub mod ph_buffer;
 pub mod rapoport_luebering;
 
 pub use enzyme::{Enzyme, ReactionStoichiometry};
@@ -31,7 +33,9 @@ pub use hemoglobin::{
     HemoglobinSolver, HemoglobinState, AdairConstants, AllostericParameters,
     OxygenDiagnostics, STANDARD_PH, STANDARD_TEMPERATURE_K, STANDARD_DPG_MM, STANDARD_PCO2_MMHG,
 };
+pub use integration::{IntegratedSolver, IntegratedDiagnostics, IntegratedEnvironment, run_integrated_diagnostics};
 pub use integrator::{IntegratorConfig, RK4Integrator};
+pub use ph_buffer::PhBufferModel;
 pub use rapoport_luebering::{RapoportLueberingSolver, calculate_p50_from_dpg, estimate_dpg_from_ph};
 
 /// Metabolite concentration pool

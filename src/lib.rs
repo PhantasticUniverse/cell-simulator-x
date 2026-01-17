@@ -19,6 +19,9 @@ pub use biochemistry::{
     ExtendedMetaboliteIndices,
     HemoglobinSolver, HemoglobinState, OxygenDiagnostics,
     STANDARD_PH, STANDARD_TEMPERATURE_K, STANDARD_DPG_MM, STANDARD_PCO2_MMHG,
+    // Phase 5: Metabolism-Oxygen Integration
+    IntegratedSolver, IntegratedDiagnostics, IntegratedEnvironment, PhBufferModel,
+    run_integrated_diagnostics,
 };
 pub use config::Parameters;
 pub use geometry::{Mesh, SpectrinNetwork};

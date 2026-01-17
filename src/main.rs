@@ -26,6 +26,7 @@ use cell_simulator_x::{
     MetabolismSolver, MetabolismConfig, MetabolitePool,
     HemoglobinSolver, HemoglobinState,
     STANDARD_PH, STANDARD_DPG_MM, STANDARD_PCO2_MMHG,
+    run_integrated_diagnostics,
 };
 use glam::Vec3;
 use winit::{
@@ -191,6 +192,7 @@ struct CliArgs {
     diagnose_physics: bool,
     diagnose_metabolism: bool,
     diagnose_oxygen: bool,
+    diagnose_integrated: bool,
     steps: usize,
     force: f32,
     duration_sec: f64,
@@ -200,6 +202,9 @@ struct CliArgs {
     dpg_mM: f64,
     temperature_C: f64,
     pco2_mmHg: f64,
+    // Integrated diagnostics parameters
+    po2_mmHg: f64,
+    atp_stress: f64,
 }
 
 impl Default for CliArgs {
@@ -208,6 +213,7 @@ impl Default for CliArgs {
             diagnose_physics: false,
             diagnose_metabolism: false,
             diagnose_oxygen: false,
+            diagnose_integrated: false,
             steps: 1000,
             force: 5.0,
             duration_sec: 60.0,  // 60 seconds default for metabolism
@@ -216,6 +222,8 @@ impl Default for CliArgs {
             dpg_mM: STANDARD_DPG_MM,
             temperature_C: 37.0,
             pco2_mmHg: STANDARD_PCO2_MMHG,
+            po2_mmHg: 100.0,     // Default arterial pO2
+            atp_stress: 1.0,     // Default normal ATP consumption
         }
     }
 }
@@ -231,6 +239,7 @@ fn parse_args() -> CliArgs {
             "--diagnose" => cli.diagnose_physics = true,
             "--diagnose-metabolism" => cli.diagnose_metabolism = true,
             "--diagnose-oxygen" => cli.diagnose_oxygen = true,
+            "--diagnose-integrated" => cli.diagnose_integrated = true,
             "-n" | "--steps" => {
                 i += 1;
                 if i < args.len() {
@@ -279,6 +288,18 @@ fn parse_args() -> CliArgs {
                     cli.pco2_mmHg = args[i].parse().unwrap_or(STANDARD_PCO2_MMHG);
                 }
             }
+            "--po2" => {
+                i += 1;
+                if i < args.len() {
+                    cli.po2_mmHg = args[i].parse().unwrap_or(100.0);
+                }
+            }
+            "--stress" => {
+                i += 1;
+                if i < args.len() {
+                    cli.atp_stress = args[i].parse().unwrap_or(1.0);
+                }
+            }
             "--help" | "-h" => {
                 println!("Cell Simulator X");
                 println!();
@@ -288,9 +309,10 @@ fn parse_args() -> CliArgs {
                 println!("  --diagnose             Run physics diagnostics (no GUI)");
                 println!("  --diagnose-metabolism  Run metabolism diagnostics (no GUI)");
                 println!("  --diagnose-oxygen      Run oxygen transport diagnostics (no GUI)");
+                println!("  --diagnose-integrated  Run integrated metabolism-oxygen diagnostics (no GUI)");
                 println!("  -n, --steps N          Number of physics steps (default: 1000)");
                 println!("  -f, --force F          Force magnitude in μN (default: 5.0)");
-                println!("  -d, --duration D       Duration in seconds for metabolism (default: 60.0)");
+                println!("  -d, --duration D       Duration in seconds for metabolism/integrated (default: 60.0)");
                 println!("  --glucose-step G       Apply glucose step change at 50% duration");
                 println!();
                 println!("Oxygen diagnostics options:");
@@ -298,6 +320,10 @@ fn parse_args() -> CliArgs {
                 println!("  --dpg DPG              2,3-DPG concentration in mM (default: 5.0)");
                 println!("  --temp TEMP            Temperature in °C (default: 37)");
                 println!("  --pco2 PCO2            CO2 partial pressure in mmHg (default: 40)");
+                println!();
+                println!("Integrated diagnostics options:");
+                println!("  --po2 PO2              O2 partial pressure in mmHg (default: 100)");
+                println!("  --stress S             ATP consumption multiplier (default: 1.0)");
                 println!();
                 println!("  --help, -h             Show this help");
                 std::process::exit(0);
@@ -594,6 +620,11 @@ fn main() -> Result<()> {
 
     if cli.diagnose_oxygen {
         return run_oxygen_diagnostics(cli.ph, cli.dpg_mM, cli.temperature_C, cli.pco2_mmHg);
+    }
+
+    if cli.diagnose_integrated {
+        run_integrated_diagnostics(cli.duration_sec, cli.po2_mmHg, cli.atp_stress);
+        return Ok(());
     }
 
     log::info!("Cell Simulator X starting...");
