@@ -268,16 +268,15 @@ fn test_steady_state_nadph_nadp_ratio() {
 
     let diag = solver.diagnostics(&pool);
 
-    // With maintained G6P, NADPH pool should be reasonable
-    // Note: Exact physiological ratios require full metabolic context
+    // Tighter tolerance matching documented target (10-20)
     assert!(
-        diag.nadph_nadp_ratio > 0.5,
-        "NADPH/NADP+ ratio too low: {}",
+        diag.nadph_nadp_ratio > 8.0,
+        "NADPH/NADP+ ratio too low (target: 8-25): {}",
         diag.nadph_nadp_ratio
     );
     assert!(
-        diag.nadph_nadp_ratio < 200.0 || !diag.nadph_nadp_ratio.is_finite(),
-        "NADPH/NADP+ ratio too high: {}",
+        diag.nadph_nadp_ratio < 25.0 || !diag.nadph_nadp_ratio.is_finite(),
+        "NADPH/NADP+ ratio too high (target: 8-25): {}",
         diag.nadph_nadp_ratio
     );
 }
@@ -396,10 +395,10 @@ fn test_h2o2_stays_low_at_steady_state() {
 
     let diag = solver.diagnostics(&pool);
 
-    // H2O2 should be kept low by GPx
+    // H2O2 should be kept low by GPx (target: <5 µM)
     assert!(
-        diag.h2o2_uM < 50.0,
-        "H2O2 should be kept low by GPx: {} uM",
+        diag.h2o2_uM < 10.0,
+        "H2O2 should be kept low by GPx (target: <10 uM): {} uM",
         diag.h2o2_uM
     );
 }

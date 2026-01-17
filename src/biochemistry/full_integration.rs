@@ -55,6 +55,10 @@ pub struct FullyIntegratedConfig {
     pub pco2_mmHg: f64,
     /// Enable ion homeostasis (Na+/K+-ATPase)
     pub enable_ion_homeostasis: bool,
+    /// Basal ATP consumption rate (mM/s)
+    /// Default: 0.015 mM/s (~15 µM/s from pumps + maintenance)
+    /// Reference: Rapoport 1976, RBC ATP demand ~0.02-0.05 mmol/L cells/hr = 5-14 µM/s
+    pub basal_atp_consumption_mM_per_sec: f64,
 }
 
 impl Default for FullyIntegratedConfig {
@@ -70,6 +74,10 @@ impl Default for FullyIntegratedConfig {
             po2_mmHg: 100.0,  // Arterial pO2
             pco2_mmHg: STANDARD_PCO2_MMHG,
             enable_ion_homeostasis: true,  // Enable ion pumps by default
+            // Basal ATP consumption for processes other than ion pumps.
+            // Set to 0.001 mM/s (1 µM/s) since Na/K-ATPase already consumes ~10 µM/s.
+            // This gives total ~11 µM/s which is in physiological range (5-14 µM/s).
+            basal_atp_consumption_mM_per_sec: 0.001,
         }
     }
 }
@@ -246,9 +254,10 @@ impl FullyIntegratedSolver {
             // Tuned to achieve NADPH/NADP+ ratio of 10-20 at steady state
             let nadph = state[indices.redox.nadph];
             let nadp = state[indices.redox.nadp_plus];
-            // Higher consumption when NADPH/NADP+ ratio is high (feedback-like)
+            // Tuned to maintain NADPH/NADP+ ratio 10-20 at steady state
+            // Low basal rate since glutathione reductase is the main NADPH consumer
             let ratio = if nadp > 1e-6 { nadph / nadp } else { 100.0 };
-            let basal_nadph_consumption = 0.003 * nadph / (0.05 + nadph) * (1.0 + 0.02 * ratio.min(30.0));
+            let basal_nadph_consumption = 0.0003 * nadph / (0.05 + nadph) * (1.0 + 0.01 * ratio.min(30.0));
             dydt[indices.redox.nadph] -= basal_nadph_consumption;
             dydt[indices.redox.nadp_plus] += basal_nadph_consumption;
 
@@ -265,7 +274,7 @@ impl FullyIntegratedSolver {
 
             // === ATP homeostasis correction ===
             // Compensates for structural ATP deficit in the model
-            // The model's PPP fraction (~60%) exceeds physiological levels (~3-11%),
+            // The model's PPP fraction (~40-50%) exceeds physiological levels (~5-15%),
             // causing insufficient ATP production from glycolysis.
             // This term represents unmodeled ATP-sparing mechanisms and
             // helps maintain ATP at physiological levels (1.5-2.5 mM).
@@ -273,7 +282,8 @@ impl FullyIntegratedSolver {
             let adp = state[indices.glycolysis.adp];
             // Regenerate ATP when it drops below target, stronger effect at low ATP
             let atp_deficit = (1.8 - atp).max(0.0);  // Target ~1.8 mM
-            let atp_regen = 0.08 * atp_deficit * adp / (0.5 + adp);
+            // Increased coefficient from 0.08 to 0.2 for better ATP maintenance
+            let atp_regen = 0.2 * atp_deficit * adp / (0.5 + adp);
             dydt[indices.glycolysis.atp] += atp_regen;
             dydt[indices.glycolysis.adp] -= atp_regen;
 
@@ -689,8 +699,8 @@ pub fn run_full_integration_diagnostics(
 
     // ATP consumption rate (membrane pumps, kinases, etc.)
     // RBC ATP consumption is ~0.02-0.05 mmol/L cells/hr = 5-14 µM/s
-    // Reduced to maintain ATP balance with current glycolysis/PPP parameters
-    let atp_consumption = 0.0;  // mM/s - disabled to test ATP dynamics
+    // Reference: Rapoport 1976
+    let atp_consumption = solver.config.basal_atp_consumption_mM_per_sec;
 
     let dt = solver.config.dt_sec;
     let n_steps = (duration_sec / dt).ceil() as usize;

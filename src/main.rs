@@ -785,12 +785,12 @@ fn run_redox_diagnostics(duration_sec: f64, oxidative_stress: f64, membrane_tens
         }
     }
 
-    // Validation targets
+    // Validation targets (aligned with documented specifications)
     println!();
-    let nadph_nadp_ok = final_diag.nadph_nadp_ratio >= 5.0 && final_diag.nadph_nadp_ratio <= 50.0;
+    let nadph_nadp_ok = final_diag.nadph_nadp_ratio >= 10.0 && final_diag.nadph_nadp_ratio <= 20.0;
     let gsh_gssg_ok = final_diag.gsh_gssg_ratio >= 50.0;
     let total_gsh_ok = final_diag.total_glutathione_mM >= 1.5 && final_diag.total_glutathione_mM <= 4.0;
-    let h2o2_ok = final_diag.h2o2_uM < 20.0;
+    let h2o2_ok = final_diag.h2o2_uM < 5.0;
 
     println!("Target Validation:");
     println!("  {} NADPH/NADP+ ratio: {:.1} (target: 10-20)",

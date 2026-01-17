@@ -86,10 +86,12 @@ fn test_steady_state_atp_concentration() {
     let atp = metabolites.get(solver.indices.glycolysis.atp);
     println!("ATP at steady state: {:.3} mM (target: 1.5-2.5 mM)", atp);
 
-    // Allow wider range for model tolerances
+    // Standalone glycolysis without PPP or ATP correction term
+    // Lower bound relaxed to 1.0 mM to account for model limitations
+    // Full integration achieves 1.5-2.5 mM target with ATP correction
     assert!(
-        atp >= 0.5 && atp <= 4.0,
-        "Steady-state ATP should be in physiological range, got {} mM",
+        atp >= 1.0 && atp <= 2.8,
+        "Steady-state ATP should be in physiological range (1.0-2.8 mM), got {} mM",
         atp
     );
 }
@@ -106,10 +108,10 @@ fn test_steady_state_23dpg_concentration() {
     let dpg = metabolites.get(solver.indices.bisphosphoglycerate_2_3);
     println!("2,3-DPG at steady state: {:.3} mM (target: 4.5-5.5 mM)", dpg);
 
-    // 2,3-DPG should remain relatively stable
+    // Tighter tolerance matching documented target (4.5-5.5 mM)
     assert!(
-        dpg >= 2.0 && dpg <= 8.0,
-        "Steady-state 2,3-DPG should be in physiological range, got {} mM",
+        dpg >= 4.0 && dpg <= 6.0,
+        "Steady-state 2,3-DPG should be in physiological range (4.0-6.0 mM), got {} mM",
         dpg
     );
 }

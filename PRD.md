@@ -303,16 +303,16 @@ struct EnvironmentState {
 #### Metabolite Concentrations (mM, normal RBC)
 | Metabolite | Concentration | Source | Model Achieves |
 |------------|---------------|--------|----------------|
-| ATP | 1.5-2.0 | Beutler 1984 | 1.52 mM ✅ |
+| ATP | 1.5-2.0 | Beutler 1984 | 1.57 mM ✅ |
 | ADP | 0.2-0.4 | Beutler 1984 | 0.73 mM |
 | 2,3-DPG | 4.0-5.0 | Benesch 1969 | 4.94 mM ✅ |
 | GSH | 2.0-2.5 | Beutler 1984 | 2.53 mM ✅ |
 | NAD⁺ | 0.05-0.07 | Beutler 1984 | - |
 | NADH | 0.003-0.005 | Beutler 1984 | - |
-| Glucose-6-P | 0.03-0.05 | Beutler 1984 | 0.42 mM* |
+| Glucose-6-P | 0.03-0.05 | Beutler 1984 | 0.39 mM* |
 | Lactate | 1.0-2.0 | Beutler 1984 | 1.0 mM ✅ |
 
-*G6P is elevated (0.42 mM vs 0.03-0.05 mM target) because glycolysis HK produces G6P faster than PPP consumes it in the isolated model. This ensures PPP never starves for substrate and is acceptable for simulation purposes.
+*G6P is elevated (0.39 mM vs 0.03-0.05 mM target) due to glycolysis/PPP flux balance. This structural limitation ensures PPP never starves for substrate and is acceptable for simulation purposes.
 
 #### Hemoglobin Parameters
 | Parameter | Value | Source |
@@ -452,25 +452,27 @@ struct EnvironmentState {
 **Verified Results (120s simulation)**:
 | Metric | Achieved | Target | Status |
 |--------|----------|--------|--------|
-| ATP | 1.52 mM | 1.5-2.5 mM | ✅ |
-| NADPH/NADP+ | 10.7 | 10-20 | ✅ |
+| ATP | 1.57 mM | 1.5-2.5 mM | ✅ |
+| NADPH/NADP+ | 10.4 | 10-20 | ✅ |
 | GSH/GSSG | 2454 | >50 | ✅ Exceeds (efficient GR) |
 | H2O2 | 0.77 µM | <5 µM | ✅ |
 | Total GSH | 2.53 mM | 2-3 mM | ✅ |
-| G6P | 0.42 mM | - | Elevated* |
-| PPP fraction | 58% | 3-11% | Elevated* |
+| G6P | 0.39 mM | - | Elevated* |
+| PPP fraction | 40% | 3-11% | Elevated* |
 
 *See notes below on model limitations.
 
 **Implementation Details**:
-- PPP: G6PDH Vmax 0.08 mM/s with NADPH inhibition (Ki 0.005 mM)
+- PPP: G6PDH Vmax 0.06 mM/s with NADPH inhibition (Ki 0.005 mM)
+- HK: Vmax 0.035 mM/s (Rapoport 1976, slightly elevated for pump load)
 - Glutathione: GPx Km_H2O2 0.002 mM, GR Km_GSSG 0.015 mM
 - Piezo1: Hill tension model, half-activation 1.5 pN/nm
-- ATP homeostasis: Correction term maintains ATP 1.5-2.5 mM despite high PPP flux
+- ATP homeostasis: Correction term (coefficient 0.2) maintains ATP 1.5-2.5 mM
+- Basal consumption: 0.001 mM/s (plus ~0.01 mM/s from Na/K-ATPase)
 
 **Notes on Model Deviations**:
-1. **G6P elevated** - Glycolysis HK produces G6P faster than PPP consumes it; acceptable
-2. **PPP fraction high (~58%)** - Structural limitation; in vivo many G6P sinks exist
+1. **G6P elevated** (~0.39 mM vs 0.03-0.05 mM) - Structural limitation; ensures PPP substrate
+2. **PPP fraction high (~40%)** - Reduced from 58% via G6PDH Vmax tuning; in vivo ~5-15%
 3. **GSH/GSSG very high (~2454)** - GSSG only 1 µM; indicates excellent antioxidant status
 
 ### Phase 6b: Ion Homeostasis (Months 17-18) ✅ COMPLETE
@@ -762,6 +764,6 @@ cell-simulator-x/
 
 ---
 
-*Document Version: 1.0*
-*Last Updated: 2026-01-17*
+*Document Version: 1.1*
+*Last Updated: 2026-01-18*
 *Author: Cell Simulator X Team*

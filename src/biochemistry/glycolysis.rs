@@ -168,10 +168,12 @@ pub struct Hexokinase {
 impl Hexokinase {
     pub fn new(indices: &MetaboliteIndices) -> Self {
         Self {
-            // Parameters from Rapoport 1976, Joshi-Palsson 1989
-            vmax_mM_per_sec: 0.033,
+            // Reference: Rapoport 1976, 0.033 mM/s
+            // Slightly elevated to support ATP homeostasis with pump load
+            vmax_mM_per_sec: 0.035,
             km_glucose_mM: 0.1,
             km_atp_mM: 1.0,
+            // Original G6P inhibition - maintains feedback control
             ki_g6p_mM: 0.5,
             stoichiometry: ReactionStoichiometry::new(
                 vec![(indices.glucose, 1.0), (indices.atp, 1.0)],
@@ -288,7 +290,8 @@ pub struct Phosphofructokinase {
 impl Phosphofructokinase {
     pub fn new(indices: &MetaboliteIndices) -> Self {
         Self {
-            vmax_mM_per_sec: 0.2,
+            // Increased Vmax to support flux through lower glycolysis
+            vmax_mM_per_sec: 0.4,
             k_half_f6p_mM: 0.15,
             km_atp_mM: 0.1,
             hill_coefficient: 2.5,
@@ -725,7 +728,8 @@ pub struct PyruvateKinase {
 impl PyruvateKinase {
     pub fn new(indices: &MetaboliteIndices) -> Self {
         Self {
-            vmax_mM_per_sec: 0.8,
+            // Vmax increased from 0.8 to 1.5 mM/s to support ATP homeostasis
+            vmax_mM_per_sec: 1.5,
             k_half_pep_mM: 0.2,
             km_adp_mM: 0.3,
             hill_coefficient: 2.0,
@@ -782,7 +786,8 @@ pub struct LactateDehydrogenase {
 impl LactateDehydrogenase {
     pub fn new(indices: &MetaboliteIndices) -> Self {
         Self {
-            vmax_f_mM_per_sec: 5.0,
+            // Increased Vmax to ensure NAD+ regeneration for GAPDH
+            vmax_f_mM_per_sec: 10.0,
             vmax_r_mM_per_sec: 0.01,  // Keq >> 1
             km_pyruvate_mM: 0.2,
             km_nadh_mM: 0.01,

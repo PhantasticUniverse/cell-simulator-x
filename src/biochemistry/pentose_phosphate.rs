@@ -134,9 +134,8 @@ impl Glucose6PhosphateDehydrogenase {
     pub fn new(indices: &RedoxIndices) -> Self {
         Self {
             // Reference: Beutler 1984, Kirkman 1986
-            // Vmax tuned to achieve PPP flux of ~10% of glucose flux
-            // Strong NADPH inhibition provides feedback control
-            vmax_mM_per_sec: 0.08,
+            // Vmax set to maintain NADPH/NADP+ ratio 10-20 at steady state
+            vmax_mM_per_sec: 0.06,
             km_g6p_mM: 0.039,
             km_nadp_mM: 0.005,
             ki_nadph_mM: 0.005, // Strong NADPH inhibition
