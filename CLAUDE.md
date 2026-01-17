@@ -12,6 +12,7 @@ cargo run -- --diagnose              # Physics diagnostics (CLI)
 cargo run -- --diagnose-metabolism   # Metabolism diagnostics (CLI)
 cargo run -- --diagnose-oxygen       # Oxygen transport diagnostics (CLI)
 cargo run -- --diagnose-integrated   # Metabolism-oxygen coupling (CLI)
+cargo run -- --diagnose-full         # Full integration (glycolysis+PPP+redox)
 cargo run -- --help                  # Full CLI options
 ```
 
@@ -27,7 +28,7 @@ cargo run -- --help                  # Full CLI options
 |--------|---------|
 | `geometry` | RBC mesh, spectrin network |
 | `physics` | Membrane mechanics, DPD, WLC |
-| `biochemistry` | Glycolysis, enzyme kinetics, hemoglobin, pH buffer, integration |
+| `biochemistry` | Glycolysis, PPP, glutathione, hemoglobin, pH buffer, ion homeostasis, full integration |
 
 ## Current Status
 
@@ -36,7 +37,8 @@ cargo run -- --help                  # Full CLI options
 - Phase 3: Metabolism ✅
 - Phase 4: Oxygen Transport ✅
 - Phase 5: Metabolism-Oxygen Integration ✅
-- Phase 6: Extended Biochemistry (next)
+- Phase 6a: Redox Metabolism ✅ (PPP, Glutathione, Piezo1)
+- Phase 6b: Ion Homeostasis ✅ (Na+/K+-ATPase, PMCA)
 
 ## Development
 

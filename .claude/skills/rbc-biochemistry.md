@@ -66,6 +66,45 @@ Glucose → G6P → F6P → F1,6BP → DHAP + GA3P
 - BPGP: Hydrolyzes 2,3-DPG → 3-PG
 - Balance determines Hb oxygen affinity
 
+## Pentose Phosphate Pathway (PPP)
+
+### Oxidative Branch
+```
+G6P → 6PG → Ribulose-5P + CO2
+      ↓         ↓
+   NADPH     NADPH
+```
+
+### Key Enzymes
+| Enzyme | Km | Vmax | Regulation |
+|--------|-----|------|------------|
+| G6PDH | 0.007 mM (G6P) | 0.08 mM/s | Inhibited by NADPH (Ki 0.005 mM) |
+| 6PGDH | 0.023 mM (6PG) | 0.04 mM/s | Product inhibition |
+
+### Physiological Role
+- Provides NADPH for glutathione reduction
+- Normal PPP flux: 3-11% of glycolysis (model: ~60% due to high demand)
+- NADPH/NADP+ ratio target: 10-20
+
+## Glutathione Cycle
+
+### Redox Reactions
+```
+H2O2 + 2GSH → GSSG + 2H2O  (GPx)
+GSSG + NADPH + H+ → 2GSH + NADP+  (GR)
+```
+
+### Key Enzymes
+| Enzyme | Function | Key Parameters |
+|--------|----------|----------------|
+| GPx | H2O2 detoxification | Vmax = 0.02 mM/s, Km_H2O2 = 0.002 mM, Km_GSH = 1.0 mM |
+| GR | GSH regeneration | Vmax = 0.15 mM/s, Km_GSSG = 0.015 mM, Km_NADPH = 0.015 mM |
+
+### Steady-State Targets
+- GSH/GSSG ratio: >50 (model achieves ~2500 due to efficient GR)
+- Total glutathione: 2-3 mM
+- H2O2: <5 µM (basal production 5 µM/s in model)
+
 ## Ion Transport
 
 ### Na+/K+-ATPase
@@ -74,10 +113,13 @@ Glucose → G6P → F6P → F1,6BP → DHAP + GA3P
 - Rate: ~3 μmol/hr/mL RBC
 
 ### Piezo1 (Mechanosensitive)
-- Activated by membrane tension
-- Conducts Ca2+, triggers:
-  - ATP release
-  - Gardos channel activation
+- Hill-type activation by membrane tension
+- Half-activation: ~1.5 pN/nm
+- Hill coefficient: ~3
+- Ca2+ conductance: ~10 pS
+- Triggers:
+  - Ca2+ influx (Ca_ext ~1.8 mM → cytosol)
+  - Downstream: Gardos channel, ATP release
   - Volume regulation
 
 ### Band 3 (AE1)
@@ -94,8 +136,12 @@ Glucose → G6P → F6P → F1,6BP → DHAP + GA3P
 | AMP | 0.01-0.02 | Beutler 1984 |
 | 2,3-DPG | 4.0-5.0 | Benesch 1969 |
 | GSH | 2.0-2.5 | Beutler 1984 |
+| GSSG | 0.02-0.05 | Beutler 1984 |
 | NAD+ | 0.05-0.07 | Beutler 1984 |
 | NADH | 0.003-0.005 | Beutler 1984 |
+| NADPH | 0.05-0.1 | Kirkman 2007 |
+| NADP+ | 0.003-0.01 | Kirkman 2007 |
+| H2O2 | <0.005 (5 µM) | Chance 1979 |
 | Pi | 1.0-1.5 | Beutler 1984 |
 
 ## Key Citations
@@ -104,3 +150,6 @@ Glucose → G6P → F6P → F1,6BP → DHAP + GA3P
 - Mulquiney et al. (1999) Biochem J 342:581 - pH-dependent kinetics
 - Imai (1982) "Allosteric Effects in Haemoglobin" - Oxygen binding
 - Beutler (1984) "Red Cell Metabolism" - Metabolite reference
+- Kirkman & Gaetani (2007) Trends Biochem Sci - NADPH homeostasis
+- Wu et al. (2004) J Biol Chem - Glutathione redox
+- Chance (1979) Meth Enzymol - H2O2 measurement

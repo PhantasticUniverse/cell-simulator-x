@@ -23,10 +23,14 @@ use cell_simulator_x::{
     physics::{PhysicsConfig, PhysicsSolver},
     render::RenderState,
     state::CellState,
-    MetabolismSolver, MetabolismConfig, MetabolitePool,
+    MetabolismSolver, MetabolismConfig, MetabolitePool, MetaboliteIndices,
     HemoglobinSolver, HemoglobinState,
     STANDARD_PH, STANDARD_DPG_MM, STANDARD_PCO2_MMHG,
     run_integrated_diagnostics,
+    // Phase 6: Redox metabolism
+    RedoxSolver, RedoxConfig, RedoxIndices, initialize_redox_metabolites,
+    // Phase 6b: Fully integrated solver
+    run_full_integration_diagnostics,
 };
 use glam::Vec3;
 use winit::{
@@ -193,6 +197,8 @@ struct CliArgs {
     diagnose_metabolism: bool,
     diagnose_oxygen: bool,
     diagnose_integrated: bool,
+    diagnose_redox: bool,
+    diagnose_full: bool,
     steps: usize,
     force: f32,
     duration_sec: f64,
@@ -205,6 +211,9 @@ struct CliArgs {
     // Integrated diagnostics parameters
     po2_mmHg: f64,
     atp_stress: f64,
+    // Redox diagnostics parameters
+    oxidative_stress: f64,
+    membrane_tension: f64,
 }
 
 impl Default for CliArgs {
@@ -214,6 +223,8 @@ impl Default for CliArgs {
             diagnose_metabolism: false,
             diagnose_oxygen: false,
             diagnose_integrated: false,
+            diagnose_redox: false,
+            diagnose_full: false,
             steps: 1000,
             force: 5.0,
             duration_sec: 60.0,  // 60 seconds default for metabolism
@@ -224,6 +235,8 @@ impl Default for CliArgs {
             pco2_mmHg: STANDARD_PCO2_MMHG,
             po2_mmHg: 100.0,     // Default arterial pO2
             atp_stress: 1.0,     // Default normal ATP consumption
+            oxidative_stress: 1.0,  // Normal (no extra stress)
+            membrane_tension: 0.0,  // No tension at rest
         }
     }
 }
@@ -240,6 +253,8 @@ fn parse_args() -> CliArgs {
             "--diagnose-metabolism" => cli.diagnose_metabolism = true,
             "--diagnose-oxygen" => cli.diagnose_oxygen = true,
             "--diagnose-integrated" => cli.diagnose_integrated = true,
+            "--diagnose-redox" => cli.diagnose_redox = true,
+            "--diagnose-full" => cli.diagnose_full = true,
             "-n" | "--steps" => {
                 i += 1;
                 if i < args.len() {
@@ -300,6 +315,18 @@ fn parse_args() -> CliArgs {
                     cli.atp_stress = args[i].parse().unwrap_or(1.0);
                 }
             }
+            "--oxidative-stress" => {
+                i += 1;
+                if i < args.len() {
+                    cli.oxidative_stress = args[i].parse().unwrap_or(1.0);
+                }
+            }
+            "--tension" => {
+                i += 1;
+                if i < args.len() {
+                    cli.membrane_tension = args[i].parse().unwrap_or(0.0);
+                }
+            }
             "--help" | "-h" => {
                 println!("Cell Simulator X");
                 println!();
@@ -310,9 +337,11 @@ fn parse_args() -> CliArgs {
                 println!("  --diagnose-metabolism  Run metabolism diagnostics (no GUI)");
                 println!("  --diagnose-oxygen      Run oxygen transport diagnostics (no GUI)");
                 println!("  --diagnose-integrated  Run integrated metabolism-oxygen diagnostics (no GUI)");
+                println!("  --diagnose-redox       Run redox/antioxidant diagnostics (no GUI)");
+                println!("  --diagnose-full        Run fully integrated diagnostics (glycolysis+PPP+Hb) (no GUI)");
                 println!("  -n, --steps N          Number of physics steps (default: 1000)");
                 println!("  -f, --force F          Force magnitude in μN (default: 5.0)");
-                println!("  -d, --duration D       Duration in seconds for metabolism/integrated (default: 60.0)");
+                println!("  -d, --duration D       Duration in seconds for metabolism/integrated/redox/full (default: 60.0)");
                 println!("  --glucose-step G       Apply glucose step change at 50% duration");
                 println!();
                 println!("Oxygen diagnostics options:");
@@ -321,9 +350,11 @@ fn parse_args() -> CliArgs {
                 println!("  --temp TEMP            Temperature in °C (default: 37)");
                 println!("  --pco2 PCO2            CO2 partial pressure in mmHg (default: 40)");
                 println!();
-                println!("Integrated diagnostics options:");
+                println!("Integrated/Full diagnostics options:");
                 println!("  --po2 PO2              O2 partial pressure in mmHg (default: 100)");
                 println!("  --stress S             ATP consumption multiplier (default: 1.0)");
+                println!("  --oxidative-stress M   Oxidative stress multiplier (default: 1.0)");
+                println!("  --tension T            Membrane tension in pN/nm (default: 0.0)");
                 println!();
                 println!("  --help, -h             Show this help");
                 std::process::exit(0);
@@ -604,6 +635,128 @@ fn run_oxygen_diagnostics(ph: f64, dpg_mM: f64, temperature_C: f64, pco2_mmHg: f
     Ok(())
 }
 
+/// Run redox metabolism diagnostics without GUI
+fn run_redox_diagnostics(duration_sec: f64, oxidative_stress: f64, membrane_tension: f64) -> Result<()> {
+    println!("=== Cell Simulator X - Redox Metabolism Diagnostics ===\n");
+
+    // Create solver
+    let glycolysis_indices = MetaboliteIndices::default();
+    let mut config = RedoxConfig::default();
+    config.oxidative_stress_multiplier = oxidative_stress;
+    config.membrane_tension_pN_per_nm = membrane_tension;
+
+    let mut solver = RedoxSolver::new(&glycolysis_indices, config);
+
+    // Create metabolite pool with enough capacity
+    let total_metabolites = 18 + RedoxIndices::new_metabolite_count();
+    let mut metabolites = MetabolitePool::new(total_metabolites);
+
+    // Initialize glycolysis shared metabolites
+    metabolites.set(glycolysis_indices.glucose, 5.0);
+    metabolites.set(glycolysis_indices.glucose_6_phosphate, 0.05);
+    metabolites.set(glycolysis_indices.fructose_6_phosphate, 0.02);
+    metabolites.set(glycolysis_indices.glyceraldehyde_3_phosphate, 0.005);
+    metabolites.set(glycolysis_indices.atp, 2.0);
+    metabolites.set(glycolysis_indices.adp, 0.25);
+
+    // Initialize redox metabolites
+    initialize_redox_metabolites(&mut metabolites, &solver.indices);
+
+    println!("Conditions:");
+    println!("  Oxidative stress:   {:.1}x", oxidative_stress);
+    println!("  Membrane tension:   {:.1} pN/nm", membrane_tension);
+    println!();
+
+    // Initial state
+    let initial_diag = solver.diagnostics(&metabolites);
+    println!("Initial State:");
+    println!("  NADPH/NADP+:  {:.1} (target: 10-20)", initial_diag.nadph_nadp_ratio);
+    println!("  GSH/GSSG:     {:.0} (target: 100-400)", initial_diag.gsh_gssg_ratio);
+    println!("  Total GSH:    {:.2} mM (target: 2-3 mM)", initial_diag.total_glutathione_mM);
+    println!("  H2O2:         {:.2} uM (target: <5 uM)", initial_diag.h2o2_uM);
+    println!("  Ca2+ (cyt):   {:.0} nM (target: ~100 nM)", initial_diag.ca_cytosolic_uM * 1000.0);
+    println!();
+
+    // Run simulation with progress reporting
+    println!("--- Running {:.1} second simulation ---\n", duration_sec);
+    println!("{:>8} {:>12} {:>12} {:>12} {:>12} {:>12}",
+        "Time(s)", "NADPH/NADP+", "GSH/GSSG", "Total GSH", "H2O2 (uM)", "Ca2+ (nM)");
+    println!("{}", "-".repeat(74));
+
+    let start = Instant::now();
+    let report_interval = duration_sec / 10.0;
+    let mut next_report = 0.0;
+
+    let dt = solver.config.dt_sec;
+    let n_steps = (duration_sec / dt).ceil() as usize;
+
+    for step in 0..n_steps {
+        let t = step as f64 * dt;
+
+        // Report at intervals
+        if t >= next_report {
+            let diag = solver.diagnostics(&metabolites);
+            println!("{:8.2} {:12.1} {:12.0} {:12.2} {:12.2} {:12.0}",
+                t,
+                diag.nadph_nadp_ratio.min(999.9),
+                diag.gsh_gssg_ratio.min(9999.0),
+                diag.total_glutathione_mM,
+                diag.h2o2_uM,
+                diag.ca_cytosolic_uM * 1000.0);
+            next_report += report_interval;
+        }
+
+        solver.step(&mut metabolites);
+    }
+
+    let elapsed = start.elapsed();
+
+    // Final state
+    println!();
+    let final_diag = solver.diagnostics(&metabolites);
+    final_diag.print_summary();
+    println!();
+    final_diag.print_rates();
+
+    // Validation
+    println!("\n=== Validation Checks ===\n");
+    let warnings = solver.validate_state(&metabolites);
+    if warnings.is_empty() {
+        println!("✓ All redox parameters within physiological range");
+    } else {
+        for warning in &warnings {
+            println!("⚠️  {}", warning);
+        }
+    }
+
+    // Validation targets
+    println!();
+    let nadph_nadp_ok = final_diag.nadph_nadp_ratio >= 5.0 && final_diag.nadph_nadp_ratio <= 50.0;
+    let gsh_gssg_ok = final_diag.gsh_gssg_ratio >= 50.0;
+    let total_gsh_ok = final_diag.total_glutathione_mM >= 1.5 && final_diag.total_glutathione_mM <= 4.0;
+    let h2o2_ok = final_diag.h2o2_uM < 20.0;
+
+    println!("Target Validation:");
+    println!("  {} NADPH/NADP+ ratio: {:.1} (target: 10-20)",
+        if nadph_nadp_ok { "✓" } else { "✗" }, final_diag.nadph_nadp_ratio);
+    println!("  {} GSH/GSSG ratio: {:.0} (target: 100-400)",
+        if gsh_gssg_ok { "✓" } else { "✗" }, final_diag.gsh_gssg_ratio);
+    println!("  {} Total glutathione: {:.2} mM (target: 2-3 mM)",
+        if total_gsh_ok { "✓" } else { "✗" }, final_diag.total_glutathione_mM);
+    println!("  {} H2O2 level: {:.2} uM (target: <5 uM)",
+        if h2o2_ok { "✓" } else { "✗" }, final_diag.h2o2_uM);
+
+    // Performance
+    println!();
+    println!("=== Performance ===");
+    println!("Wall clock time: {:.2?}", elapsed);
+    println!("Simulation time: {:.2} s", solver.time_sec);
+    println!("Steps: {}", n_steps);
+    println!("Steps/second: {:.0}", n_steps as f32 / elapsed.as_secs_f32());
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -624,6 +777,20 @@ fn main() -> Result<()> {
 
     if cli.diagnose_integrated {
         run_integrated_diagnostics(cli.duration_sec, cli.po2_mmHg, cli.atp_stress);
+        return Ok(());
+    }
+
+    if cli.diagnose_redox {
+        return run_redox_diagnostics(cli.duration_sec, cli.oxidative_stress, cli.membrane_tension);
+    }
+
+    if cli.diagnose_full {
+        run_full_integration_diagnostics(
+            cli.duration_sec,
+            cli.oxidative_stress,
+            cli.membrane_tension,
+            cli.po2_mmHg,
+        );
         return Ok(());
     }
 

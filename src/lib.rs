@@ -16,12 +16,22 @@ pub mod state;
 
 pub use biochemistry::{
     MetabolismSolver, MetabolismConfig, MetabolitePool, MetabolismDiagnostics,
-    ExtendedMetaboliteIndices,
+    ExtendedMetaboliteIndices, MetaboliteIndices,
     HemoglobinSolver, HemoglobinState, OxygenDiagnostics,
     STANDARD_PH, STANDARD_TEMPERATURE_K, STANDARD_DPG_MM, STANDARD_PCO2_MMHG,
     // Phase 5: Metabolism-Oxygen Integration
     IntegratedSolver, IntegratedDiagnostics, IntegratedEnvironment, PhBufferModel,
     run_integrated_diagnostics,
+    // Phase 6: Redox Metabolism (PPP, Glutathione, Piezo1)
+    RedoxSolver, RedoxConfig, RedoxDiagnostics, RedoxIndices,
+    PentosePhosphatePathway, GlutathioneCycle, Piezo1System, Piezo1Diagnostics,
+    initialize_redox_metabolites,
+    // Phase 6b: Fully Integrated Solver (Glycolysis + PPP + Glutathione + O2 + Ions)
+    FullyIntegratedSolver, FullyIntegratedConfig, FullyIntegratedDiagnostics,
+    FullyIntegratedIndices, run_full_integration_diagnostics,
+    // Phase 6b: Ion Homeostasis
+    IonIndices, IonHomeostasisSystem, IonHomeostasisConfig, IonDiagnostics, NaKATPase,
+    initialize_ion_metabolites,
 };
 pub use config::Parameters;
 pub use geometry::{Mesh, SpectrinNetwork};

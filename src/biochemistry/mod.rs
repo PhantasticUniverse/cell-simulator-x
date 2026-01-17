@@ -3,40 +3,61 @@
 //! This module implements metabolic pathways specific to human red blood cells:
 //! - Glycolysis (sole ATP source in mature RBCs)
 //! - Rapoport-Luebering shunt (2,3-BPG regulation)
+//! - Pentose phosphate pathway (NADPH production)
+//! - Glutathione cycle (antioxidant defense)
+//! - Piezo1 mechanotransduction (Ca2+ signaling)
 //!
 //! RBCs are unique in that they:
 //! - Lack mitochondria (no oxidative phosphorylation)
 //! - Rely entirely on anaerobic glycolysis for ATP
 //! - Contain high levels of 2,3-BPG for hemoglobin regulation
+//! - Require robust antioxidant systems (GSH/NADPH) due to oxygen exposure
 //!
 //! Key targets (from PRD):
 //! - ATP concentration: 1.5-2.5 mM
 //! - 2,3-DPG concentration: 4.5-5.5 mM
 //! - Glucose consumption: 1.2-1.5 μmol/hr/mL RBCs
+//! - NADPH/NADP+ ratio: 10-20
+//! - GSH/GSSG ratio: 100-400
+//! - Total GSH: 2-3 mM
 //!
 //! References:
 //! - Rapoport TA et al. Eur J Biochem. 1976;69:571-584
 //! - Joshi A, Palsson BO. J Theor Biol. 1989;141:515-528
 //! - Mulquiney PJ, Kuchel PW. Biochem J. 1999;342:567-580
+//! - Beutler E. Red Cell Metabolism. 1984
+//! - Meister A, Anderson ME. Annu Rev Biochem. 1983;52:711-760
 
 pub mod enzyme;
+pub mod full_integration;
 pub mod glycolysis;
+pub mod glutathione;
 pub mod hemoglobin;
 pub mod integration;
 pub mod integrator;
+pub mod ion_homeostasis;
+pub mod pentose_phosphate;
 pub mod ph_buffer;
+pub mod piezo1;
 pub mod rapoport_luebering;
+pub mod redox;
 
 pub use enzyme::{Enzyme, ReactionStoichiometry};
 pub use glycolysis::{GlycolysisSolver, MetaboliteIndices};
+pub use glutathione::{GlutathioneCycle, GlutathionePeroxidase, GlutathioneReductase, BASAL_H2O2_PRODUCTION_MM_PER_SEC};
 pub use hemoglobin::{
     HemoglobinSolver, HemoglobinState, AdairConstants, AllostericParameters,
     OxygenDiagnostics, STANDARD_PH, STANDARD_TEMPERATURE_K, STANDARD_DPG_MM, STANDARD_PCO2_MMHG,
 };
 pub use integration::{IntegratedSolver, IntegratedDiagnostics, IntegratedEnvironment, run_integrated_diagnostics};
 pub use integrator::{IntegratorConfig, RK4Integrator};
+pub use ion_homeostasis::{IonIndices, IonHomeostasisSystem, IonHomeostasisConfig, IonDiagnostics, NaKATPase, initialize_ion_metabolites};
+pub use pentose_phosphate::{PentosePhosphatePathway, RedoxIndices};
 pub use ph_buffer::PhBufferModel;
+pub use piezo1::{Piezo1Channel, Piezo1System, Piezo1Diagnostics};
 pub use rapoport_luebering::{RapoportLueberingSolver, calculate_p50_from_dpg, estimate_dpg_from_ph};
+pub use redox::{RedoxSolver, RedoxConfig, RedoxDiagnostics, initialize_redox_metabolites};
+pub use full_integration::{FullyIntegratedSolver, FullyIntegratedConfig, FullyIntegratedDiagnostics, run_full_integration_diagnostics};
 
 /// Metabolite concentration pool
 ///
@@ -87,6 +108,84 @@ impl MetabolitePool {
         // 2,3-BPG (mM)
         // Reference: Benesch & Benesch 1969
         pool.set(indices.bisphosphoglycerate_2_3, 5.0);
+
+        pool
+    }
+
+    /// Create a pool with all metabolites for fully integrated simulation
+    ///
+    /// Includes glycolysis (0-16), 2,3-BPG (17), redox metabolites (18-34),
+    /// and ion metabolites (35-37) for a total of 38 metabolites.
+    pub fn default_fully_integrated() -> Self {
+        let indices = FullyIntegratedIndices::new();
+        let mut pool = Self::new(indices.total_count());
+
+        // Glycolytic intermediates (mM)
+        // Reference: Rapoport 1976, Joshi-Palsson 1989
+        pool.set(indices.glycolysis.glucose, 5.0);
+        pool.set(indices.glycolysis.glucose_6_phosphate, 0.05);
+        pool.set(indices.glycolysis.fructose_6_phosphate, 0.02);
+        pool.set(indices.glycolysis.fructose_1_6_bisphosphate, 0.01);
+        pool.set(indices.glycolysis.dihydroxyacetone_phosphate, 0.1);
+        pool.set(indices.glycolysis.glyceraldehyde_3_phosphate, 0.005);
+        pool.set(indices.glycolysis.bisphosphoglycerate_1_3, 0.001);
+        pool.set(indices.glycolysis.phosphoglycerate_3, 0.1);
+        pool.set(indices.glycolysis.phosphoglycerate_2, 0.02);
+        pool.set(indices.glycolysis.phosphoenolpyruvate, 0.02);
+        pool.set(indices.glycolysis.pyruvate, 0.1);
+        pool.set(indices.glycolysis.lactate, 1.5);
+
+        // Cofactors (mM)
+        // Reference: Minakami & Yoshikawa 1966, Zerez et al. 1987
+        pool.set(indices.glycolysis.atp, 2.0);
+        pool.set(indices.glycolysis.adp, 0.25);
+        pool.set(indices.glycolysis.nad, 0.07);
+        pool.set(indices.glycolysis.nadh, 0.03);
+        pool.set(indices.glycolysis.pi, 1.0);
+
+        // 2,3-BPG (mM)
+        // Reference: Benesch & Benesch 1969
+        pool.set(indices.bisphosphoglycerate_2_3, 5.0);
+
+        // PPP intermediates (low concentrations)
+        pool.set(indices.redox.phosphogluconolactone_6, 0.001);
+        pool.set(indices.redox.phosphogluconate_6, 0.02);
+        pool.set(indices.redox.ribulose_5_phosphate, 0.01);
+        pool.set(indices.redox.ribose_5_phosphate, 0.01);
+        pool.set(indices.redox.xylulose_5_phosphate, 0.01);
+        pool.set(indices.redox.sedoheptulose_7_phosphate, 0.01);
+        pool.set(indices.redox.erythrose_4_phosphate, 0.01);
+
+        // NADPH/NADP+ (ratio ~15)
+        // Reference: Veech 1969
+        pool.set(indices.redox.nadph, 0.3);
+        pool.set(indices.redox.nadp_plus, 0.02);
+
+        // Glutathione (GSH/GSSG ratio ~250, total ~2.5 mM)
+        // Reference: Beutler 1969, Meister 1983
+        pool.set(indices.redox.gsh, 2.5);
+        pool.set(indices.redox.gssg, 0.01);
+
+        // H2O2 (very low at steady state)
+        // Reference: Chance 1979
+        pool.set(indices.redox.h2o2, 0.001);  // 1 uM
+
+        // Cytosolic Ca2+ (100 nM = 0.1 uM)
+        // Reference: Engelmann 2008
+        pool.set(indices.redox.ca2_plus_cytosolic, 0.1);
+
+        // GSH synthesis precursors
+        // Reference: Meister 1983
+        pool.set(indices.redox.glutamate, 0.5);
+        pool.set(indices.redox.cysteine, 0.05);
+        pool.set(indices.redox.glycine, 0.5);
+        pool.set(indices.redox.gamma_glu_cys, 0.001);
+
+        // Ion concentrations (mM)
+        // Reference: Bernstein 1954
+        pool.set(indices.ions.na_plus_cytosolic, 10.0);   // Target: 5-15 mM
+        pool.set(indices.ions.k_plus_cytosolic, 140.0);   // Target: 140-150 mM
+        pool.set(indices.ions.cl_minus_cytosolic, 80.0);  // ~80 mM in RBC cytosol
 
         pool
     }
@@ -148,6 +247,52 @@ impl ExtendedMetaboliteIndices {
     /// Total number of metabolites
     pub fn total_count(&self) -> usize {
         18  // 17 glycolysis + 1 for 2,3-BPG
+    }
+}
+
+/// Fully integrated indices including all metabolites across all subsystems
+///
+/// Layout:
+/// - Indices 0-16: Glycolysis (via MetaboliteIndices)
+/// - Index 17: 2,3-BPG
+/// - Indices 18-34: Redox metabolites (via RedoxIndices)
+/// - Indices 35-37: Ion metabolites (Na+, K+, Cl-)
+///
+/// Total: 38 metabolites for the fully integrated system
+#[derive(Debug, Clone, Copy)]
+pub struct FullyIntegratedIndices {
+    /// Glycolysis indices (0-16)
+    pub glycolysis: MetaboliteIndices,
+    /// 2,3-BPG index (17)
+    pub bisphosphoglycerate_2_3: usize,
+    /// Redox indices (18-34)
+    pub redox: RedoxIndices,
+    /// Ion indices (35-37)
+    pub ions: IonIndices,
+}
+
+impl FullyIntegratedIndices {
+    /// Create new fully integrated indices
+    pub fn new() -> Self {
+        let glycolysis = MetaboliteIndices::default();
+        let redox = RedoxIndices::new(&glycolysis, 18);
+        Self {
+            glycolysis,
+            bisphosphoglycerate_2_3: 17,
+            redox,
+            ions: IonIndices::new(&glycolysis, &redox, 35),
+        }
+    }
+
+    /// Total number of metabolites in the fully integrated system
+    pub fn total_count(&self) -> usize {
+        38  // 17 glycolysis + 1 2,3-BPG + 17 redox + 3 ions
+    }
+}
+
+impl Default for FullyIntegratedIndices {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
