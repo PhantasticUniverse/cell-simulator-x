@@ -327,11 +327,12 @@ impl RenderState {
         });
 
         // Create mesh buffers
+        // Use VERTEX | COPY_DST to allow dynamic updates for physics simulation
         let mesh = &cell_state.geometry.mesh;
         let mesh_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Mesh Vertex Buffer"),
             contents: bytemuck::cast_slice(&mesh.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
         let mesh_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -367,7 +368,7 @@ impl RenderState {
         let line_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Line Vertex Buffer"),
             contents: bytemuck::cast_slice(&line_vertices),
-            usage: wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
         // Create depth texture
@@ -433,6 +434,51 @@ impl RenderState {
     /// Toggle spectrin network visibility
     pub fn set_show_spectrin(&mut self, show: bool) {
         self.show_spectrin = show;
+    }
+
+    /// Update mesh vertices for dynamic simulation
+    ///
+    /// This uploads new vertex data to the GPU buffer.
+    pub fn update_mesh(&mut self, mesh: &crate::geometry::Mesh) {
+        self.queue.write_buffer(
+            &self.mesh_vertex_buffer,
+            0,
+            bytemuck::cast_slice(&mesh.vertices),
+        );
+    }
+
+    /// Update spectrin network lines after physics simulation
+    pub fn update_spectrin(&mut self, spectrin: &crate::geometry::SpectrinNetwork) {
+        let mut line_vertices: Vec<LineVertex> = Vec::new();
+        let line_color = [0.2, 0.8, 0.3, 0.7]; // Green, semi-transparent
+
+        for edge in &spectrin.edges {
+            let pos_a = spectrin.nodes[edge.node_a as usize].position;
+            let pos_b = spectrin.nodes[edge.node_b as usize].position;
+
+            // Offset slightly outward from surface for visibility
+            let offset = 0.02; // μm
+            let dir_a = glam::Vec3::from_array(pos_a).normalize();
+            let dir_b = glam::Vec3::from_array(pos_b).normalize();
+
+            line_vertices.push(LineVertex {
+                position: (glam::Vec3::from_array(pos_a) + dir_a * offset).to_array(),
+                color: line_color,
+            });
+            line_vertices.push(LineVertex {
+                position: (glam::Vec3::from_array(pos_b) + dir_b * offset).to_array(),
+                color: line_color,
+            });
+        }
+
+        // Only update if we have the same number of vertices
+        if line_vertices.len() as u32 == self.line_vertex_count {
+            self.queue.write_buffer(
+                &self.line_vertex_buffer,
+                0,
+                bytemuck::cast_slice(&line_vertices),
+            );
+        }
     }
 
     /// Update state (called each frame before render)

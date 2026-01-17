@@ -8,10 +8,14 @@ use crate::{
 };
 use glam::Vec3;
 
+use super::PhysicsState;
+
 /// Complete state of a single red blood cell
 pub struct CellState {
     /// Geometric representation
     pub geometry: GeometryState,
+    /// Physics/mechanics state
+    pub physics: PhysicsState,
     /// Position in world space (μm)
     pub position_um: Vec3,
     /// Velocity (μm/s)
@@ -38,17 +42,43 @@ impl CellState {
         let volume_um3 = mesh.calculate_volume();
         let surface_area_um2 = mesh.calculate_surface_area();
 
+        // Initialize physics state
+        let vertex_count = mesh.vertices.len();
+        let mut physics = PhysicsState::new(vertex_count);
+
+        // Store reference positions for strain calculation
+        let reference_positions: Vec<Vec3> = mesh.vertices
+            .iter()
+            .map(|v| v.position_vec3())
+            .collect();
+        physics.init_reference_positions(&reference_positions);
+
         Self {
             geometry: GeometryState {
                 mesh,
                 spectrin_network,
             },
+            physics,
             position_um: Vec3::ZERO,
             velocity_um_per_sec: Vec3::ZERO,
             angular_velocity_rad_per_sec: Vec3::ZERO,
             volume_um3,
             surface_area_um2,
         }
+    }
+
+    /// Update volume and surface area from current mesh
+    pub fn update_geometry_stats(&mut self) {
+        self.volume_um3 = self.geometry.mesh.calculate_volume();
+        self.surface_area_um2 = self.geometry.mesh.calculate_surface_area();
+    }
+
+    /// Get current vertex positions as Vec3 array
+    pub fn vertex_positions(&self) -> Vec<Vec3> {
+        self.geometry.mesh.vertices
+            .iter()
+            .map(|v| v.position_vec3())
+            .collect()
     }
 }
 

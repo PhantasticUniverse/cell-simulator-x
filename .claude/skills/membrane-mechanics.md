@@ -1,6 +1,10 @@
 # Membrane Mechanics Domain Knowledge
 
+> **Implementation Status**: ✅ Implemented in Phase 2 (`src/physics/`)
+
 ## DPD (Dissipative Particle Dynamics) Solver
+
+**Implementation**: `src/physics/dpd.rs`
 
 ### Force Components
 ```
@@ -28,21 +32,39 @@ F_R = σ * w_R(r) * θ_ij * r̂_ij
 w_D(r) = [w_R(r)]²
 ```
 
+### Implementation Parameters (DPDParameters)
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| γ (gamma) | 4.5 | Dissipation coefficient |
+| k_BT | 4.11e-9 μN·μm | Thermal energy at 37°C |
+| r_c | 1.0 μm | Cutoff radius |
+| a | 25.0 | Conservative force coefficient |
+
 ### Time Integration
-- Velocity-Verlet with DPD correction
-- Typical dt: 0.001-0.01 τ (DPD time units)
+- Velocity-Verlet with DPD correction (`src/physics/integrator.rs`)
+- Default dt: 1e-5 s (10 μs)
 - Temperature control via γ, σ balance
 
 ## Spectrin WLC (Worm-Like Chain) Model
+
+**Implementation**: `src/physics/wlc.rs`
 
 ### Marko-Siggia Force-Extension
 ```
 F = (k_B * T / L_p) * [1/(4*(1-x/L_c)²) - 1/4 + x/L_c]
 ```
 
+### Implementation Parameters (WLCParameters)
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| L_p | 20 nm (0.020 μm) | Persistence length |
+| L_c | 200 nm (0.200 μm) | Contour length |
+| L_rest | 75 nm (0.075 μm) | Rest length in situ |
+| max_extension | 0.95 | Cap to prevent singularity |
+
 Where:
-- L_p = persistence length = 7.5 nm (Rief et al. 1999)
-- L_c = contour length = 194 nm (spectrin tetramer)
+- L_p = persistence length = 20 nm (updated from Rief et al. 1999)
+- L_c = contour length = 200 nm (spectrin tetramer)
 - x = end-to-end distance
 
 ### Network Topology
@@ -57,26 +79,37 @@ At rest length (70-80 nm):
 
 ## Skalak Strain Energy Function
 
+**Implementation**: `src/physics/membrane.rs`
+
 ### Membrane Energy
 ```
 W = (G_s/4) * (I₁² + 2*I₁ - 2*I₂) + (G_a/4) * I₂²
 ```
 
+### Implementation Parameters (SkalakMaterial)
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| G_s (shear modulus) | 5.5 μN/m | Evans & Waugh 1977 |
+| G_a (area modulus) | 450,000 μN/m (450 mN/m) | Evans et al. 1976 |
+| κ (bending modulus) | 0.18 pN·μm | Evans 1983 |
+| C₀ (spontaneous curvature) | 0 | Unstressed RBC |
+
 Where:
 - G_s = shear modulus = 5.5 μN/m (Dao et al. 2003)
-- G_a = area dilation modulus ≈ 500 μN/m
+- G_a = area dilation modulus ≈ 450 mN/m (near incompressibility)
 - I₁ = α² + β² - 2 (strain invariant 1)
 - I₂ = α²β² - 1 (strain invariant 2)
 - α, β = principal stretch ratios
 
 ### Bending Energy (Helfrich)
+Implementation uses discrete Laplacian approximation for bending forces.
 ```
 W_bend = (κ/2) * (2H - C₀)² + κ_G * K
 ```
 
 Where:
-- κ = bending modulus = 2×10⁻¹⁹ J (Evans 1983)
-- H = mean curvature
+- κ = bending modulus = 0.18 pN·μm ≈ 44 k_BT (Evans 1983)
+- H = mean curvature (computed via umbrella operator)
 - C₀ = spontaneous curvature
 - K = Gaussian curvature
 - κ_G = Gaussian modulus ≈ -κ

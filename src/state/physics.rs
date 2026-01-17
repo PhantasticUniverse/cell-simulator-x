@@ -16,6 +16,16 @@ pub struct PhysicsState {
     pub vertex_velocities_um_per_sec: Vec<Vec3>,
     /// Total elastic energy of the membrane (pJ)
     pub elastic_energy_pJ: f32,
+    /// Spectrin network elastic energy (pJ)
+    pub spectrin_energy_pJ: f32,
+    /// Total kinetic energy (pJ)
+    pub kinetic_energy_pJ: f32,
+    /// Simulation time in seconds
+    pub simulation_time_sec: f64,
+    /// Number of physics steps taken
+    pub step_count: u64,
+    /// Reference positions for strain calculation
+    pub reference_positions: Vec<Vec3>,
 }
 
 impl PhysicsState {
@@ -26,7 +36,45 @@ impl PhysicsState {
             vertex_forces_uN: vec![Vec3::ZERO; vertex_count],
             vertex_velocities_um_per_sec: vec![Vec3::ZERO; vertex_count],
             elastic_energy_pJ: 0.0,
+            spectrin_energy_pJ: 0.0,
+            kinetic_energy_pJ: 0.0,
+            simulation_time_sec: 0.0,
+            step_count: 0,
+            reference_positions: Vec::new(),
         }
+    }
+
+    /// Initialize reference positions from current mesh
+    pub fn init_reference_positions(&mut self, positions: &[Vec3]) {
+        self.reference_positions = positions.to_vec();
+    }
+
+    /// Get total mechanical energy (elastic + kinetic)
+    pub fn total_energy_pJ(&self) -> f32 {
+        self.elastic_energy_pJ + self.spectrin_energy_pJ + self.kinetic_energy_pJ
+    }
+
+    /// Reset all velocities to zero
+    pub fn reset_velocities(&mut self) {
+        for v in self.vertex_velocities_um_per_sec.iter_mut() {
+            *v = Vec3::ZERO;
+        }
+    }
+
+    /// Get maximum velocity magnitude
+    pub fn max_velocity_um_per_sec(&self) -> f32 {
+        self.vertex_velocities_um_per_sec
+            .iter()
+            .map(|v| v.length())
+            .fold(0.0f32, f32::max)
+    }
+
+    /// Get maximum force magnitude
+    pub fn max_force_uN(&self) -> f32 {
+        self.vertex_forces_uN
+            .iter()
+            .map(|f| f.length())
+            .fold(0.0f32, f32::max)
     }
 }
 

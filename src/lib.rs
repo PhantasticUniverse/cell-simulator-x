@@ -9,10 +9,12 @@
 
 pub mod config;
 pub mod geometry;
+pub mod physics;
 pub mod render;
 pub mod state;
 
 pub use config::Parameters;
 pub use geometry::{Mesh, SpectrinNetwork};
+pub use physics::{PhysicsConfig, PhysicsSolver};
 pub use render::{Camera, RenderState};
 pub use state::CellState;

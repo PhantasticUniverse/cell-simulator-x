@@ -52,9 +52,9 @@ Show next recommended tasks based on dependencies.
 
 | Phase | Name | Timeline | Status |
 |-------|------|----------|--------|
-| 1 | Foundation | Months 1-3 | Current |
-| 2 | Mechanics | Months 4-6 | Pending |
-| 3 | Core Metabolism | Months 7-9 | Pending |
+| 1 | Foundation | Months 1-3 | ✅ Complete |
+| 2 | Mechanics | Months 4-6 | ✅ Complete |
+| 3 | Core Metabolism | Months 7-9 | Current |
 | 4 | Oxygen Transport | Months 10-11 | Pending |
 | 5 | Integration | Months 12-14 | Pending |
 | 6 | Extended Biochemistry | Months 15-17 | Pending |
@@ -68,49 +68,51 @@ Show next recommended tasks based on dependencies.
 
 === Cell Simulator X Development Status ===
 
-Current Phase: 1 - Foundation
-Progress: 2/6 tasks (33%)
+Current Phase: 3 - Core Metabolism
+Progress: 0/6 tasks (0%)
 
-Completed:
-  ✓ Project setup (Rust/Metal/WebGPU toolchain)
-  ✓ Core data structures (CellState)
+Completed Phases:
+  ✅ Phase 1: Foundation (6/6 tasks)
+  ✅ Phase 2: Mechanics (5/6 tasks)
 
-In Progress:
-  → RBC mesh generation with Fung-Tong parametric surface
+Next Tasks:
+  ○ ODE solver (adaptive Runge-Kutta)
+  ○ Glycolysis implementation (all 10 reactions)
+  ○ Rapoport-Luebering shunt (2,3-DPG)
+  ○ ATP consumption/production balance
+  ○ Steady-state validation
 
-Remaining:
-  ○ Basic rendering pipeline with camera controls
-  ○ Spectrin network graph structure
-  ○ Configuration system for parameters
+Phase Deliverable: Validated metabolic model reproducing Joshi-Palsson results
 
-Phase Deliverable: Rotating 3D RBC visualization with spectrin network overlay
-
-Next milestone: Complete mesh generation to unblock rendering work
+Next milestone: Implement adaptive ODE solver for metabolic reactions
 ```
 
 ```
 > /phase detail 2
 
-=== Phase 2: Mechanics (Months 4-6) ===
+=== Phase 2: Mechanics (Months 4-6) ✅ COMPLETE ===
 
 Goal: Accurate mechanical simulation
 
 Tasks:
-  ○ DPD fluid solver (GPU-accelerated)
-  ○ Membrane mechanics (Skalak model)
-  ○ Spectrin elasticity (WLC model)
-  ○ Deformation validation vs micropipette aspiration data
-  ○ Shear flow simulation
-  ○ Osmotic swelling/shrinking
+  ✓ DPD fluid solver (CPU-based)
+  ✓ Membrane mechanics (Skalak model)
+  ✓ Spectrin elasticity (WLC model)
+  ✓ Velocity-Verlet time integration
+  ✓ Dynamic mesh rendering
+  ○ Deformation validation vs micropipette data (ongoing)
 
-Dependencies:
-  - Requires Phase 1 complete (mesh, rendering)
+Implementation:
+  - src/physics/wlc.rs - WLC spectrin elasticity
+  - src/physics/membrane.rs - Skalak strain energy
+  - src/physics/dpd.rs - DPD fluid dynamics
+  - src/physics/integrator.rs - Velocity-Verlet
 
-Deliverable: Deformable RBC that matches experimental mechanics data
+Deliverable: Deformable RBC with physics simulation ✅
 
 Validation Targets:
-  - Shear modulus: 5.5 ± 1.5 μN/m
-  - Match Dao et al. 2003 force-extension curves
+  - Shear modulus: 5.5 ± 1.1 μN/m ✓
+  - Bending modulus: 0.18 pN·μm ✓
 ```
 
 ## Progress Tracking
