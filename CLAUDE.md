@@ -37,6 +37,8 @@ cargo run -- --help                  # Full CLI options
 | `biochemistry` | Glycolysis, PPP, glutathione, hemoglobin, pH buffer, ion homeostasis, full integration |
 | `biochemistry/disease` | Disease models: storage lesion, diabetic, malaria, sickle cell |
 | `coupling` | Mechano-metabolic coupling: TensionComputer, SpectrinModulator, CoupledSolver |
+| `render/hud` | egui-based HUD overlay: panels, widgets, theme |
+| `export` | Screenshot, CSV time-series, JSON state export |
 
 ## Current Status
 
@@ -49,6 +51,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 6b: Ion Homeostasis ✅ (Na+/K+-ATPase, PMCA)
 - Phase 7: Disease Models ✅ (Storage Lesion, Diabetic, Malaria, Sickle Cell)
 - Phase 8: Mechano-Metabolic Coupling ✅ (TensionComputer, SpectrinModulator, CoupledSolver)
+- Phase 9: GUI HUD & Export ✅ (Real-time metabolite display, JSON/CSV export)
 
 ## Development
 

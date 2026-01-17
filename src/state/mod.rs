@@ -6,9 +6,11 @@
 mod biochemistry;
 mod cell;
 mod environment;
+pub mod metrics;
 mod physics;
 
 pub use biochemistry::{BiochemistryState, HemoglobinState, IonState, MetaboliteState};
 pub use cell::{CellState, GeometryState};
 pub use environment::EnvironmentState;
+pub use metrics::{DiseaseIndicator, MetaboliteStatus, SimulationMetrics, SimulationMode};
 pub use physics::PhysicsState;

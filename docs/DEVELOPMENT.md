@@ -129,6 +129,23 @@ Ion Homeostasis:
 | Stiffness modifier (normal ATP) | 1.0 | 1.0 | ✅ |
 | Stiffness modifier (low ATP) | 1.375 | - | ✅ |
 
+### Phase 9: GUI HUD & Export System ✅
+- **HUD Overlay**: egui-based real-time display integrated with wgpu render pipeline
+- **Theme**: "Laboratory Precision" dark theme with biological color accents
+- **Panels**:
+  - SIMULATION: Time, FPS, steps/sec, mode, physics status
+  - METABOLITES: ATP, 2,3-DPG, O₂ saturation, pH, redox ratios, ions
+  - DISEASE: Active disease indicator with severity and affected parameters
+  - HELP: Keyboard shortcuts overlay
+- **Custom Widgets**: StatusBar, O2Gauge (circular), LabeledValue, DiseaseBadge
+- **Status Indicators**: Color-coded (green/yellow/red) for metabolite ranges
+- **Export System**:
+  - JSON state export (F12 key)
+  - CSV time-series export (configurable interval)
+  - PNG screenshot capability
+- **SimulationMetrics**: Unified data structure for HUD display and export
+- **Keyboard Controls**: H (help), E (export), M (metabolites), D (disease), Tab (HUD toggle)
+
 ## Module Structure
 
 ```
@@ -159,9 +176,24 @@ src/
 │   ├── coupled_solver.rs    # CoupledSolver orchestrator
 │   ├── tension_computer.rs  # Membrane tension from strain
 │   └── spectrin_modulator.rs # ATP → spectrin stiffness
-├── render/         # WebGPU/Metal rendering
+├── render/         # WebGPU/Metal rendering (Phase 9)
+│   ├── mod.rs               # Module exports
+│   ├── pipeline.rs          # Render pipeline, egui integration
+│   ├── camera.rs            # Orbit camera
+│   └── hud/                 # HUD overlay system
+│       ├── mod.rs           # HudOverlay orchestrator
+│       ├── theme.rs         # Dark scientific theme
+│       ├── state.rs         # Panel visibility state
+│       ├── panels.rs        # Panel rendering
+│       └── widgets.rs       # Custom widgets (StatusBar, O2Gauge)
+├── export/         # Data export system (Phase 9)
+│   ├── mod.rs               # Export orchestrator
+│   ├── screenshot.rs        # PNG capture
+│   ├── csv_export.rs        # Time-series CSV export
+│   └── json_export.rs       # Full state JSON export
 ├── config/         # Parameters, JSON loading
 └── state/          # Cell state management
+    └── metrics.rs           # SimulationMetrics for HUD/export (Phase 9)
 ```
 
 ## CLI Diagnostics
@@ -268,6 +300,12 @@ cargo run -- --diagnose-disease storage --disease-param 42 --diagnose-coupled
 | P | Toggle physics |
 | F | Apply force |
 | +/- | Adjust substeps |
+| H | Toggle help overlay |
+| E | Toggle export menu |
+| M | Toggle metabolites panel |
+| D | Toggle disease panel |
+| Tab | Toggle entire HUD |
+| F12 | Export state to JSON |
 | Esc | Exit |
 
 ## Validation Targets

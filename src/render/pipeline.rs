@@ -9,10 +9,12 @@ use std::time::Instant;
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
+use winit::event::WindowEvent;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use super::camera::Camera;
-use crate::state::CellState;
+use super::hud::HudOverlay;
+use crate::state::{CellState, SimulationMetrics};
 
 /// Vertex for spectrin network lines
 #[repr(C)]
@@ -49,7 +51,6 @@ impl Default for RenderSettings {
 
 /// Main render state managing all GPU resources
 pub struct RenderState {
-    #[allow(dead_code)]
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -81,6 +82,9 @@ pub struct RenderState {
     pub camera: Camera,
     show_spectrin: bool,
     last_frame_time: Instant,
+
+    // HUD overlay
+    pub hud: HudOverlay,
 }
 
 impl RenderState {
@@ -224,6 +228,7 @@ impl RenderState {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
+                compilation_options: Default::default(),
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<crate::geometry::Vertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
@@ -249,6 +254,7 @@ impl RenderState {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
+                compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -281,6 +287,7 @@ impl RenderState {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_line",
+                compilation_options: Default::default(),
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<LineVertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
@@ -301,6 +308,7 @@ impl RenderState {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_line",
+                compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -374,6 +382,9 @@ impl RenderState {
         // Create depth texture
         let depth_texture = Self::create_depth_texture(&device, &config);
 
+        // Create HUD overlay
+        let hud = HudOverlay::new(&window, &device, config.format);
+
         Ok(Self {
             window,
             surface,
@@ -395,6 +406,7 @@ impl RenderState {
             camera,
             show_spectrin: true,
             last_frame_time: Instant::now(),
+            hud,
         })
     }
 
@@ -498,8 +510,30 @@ impl RenderState {
         );
     }
 
-    /// Render a frame
+    /// Handle window events for HUD
+    ///
+    /// Returns true if the HUD consumed the event
+    pub fn handle_event(&mut self, event: &WindowEvent) -> bool {
+        self.hud.handle_event(&self.window, event)
+    }
+
+    /// Check if HUD wants keyboard input
+    pub fn hud_wants_keyboard(&self) -> bool {
+        self.hud.wants_keyboard_input()
+    }
+
+    /// Check if HUD wants mouse input
+    pub fn hud_wants_pointer(&self) -> bool {
+        self.hud.wants_pointer_input()
+    }
+
+    /// Render a frame (3D scene only, without HUD)
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        self.render_with_hud(&SimulationMetrics::default())
+    }
+
+    /// Render a frame with HUD overlay
+    pub fn render_with_hud(&mut self, metrics: &SimulationMetrics) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -511,9 +545,10 @@ impl RenderState {
                 label: Some("Render Encoder"),
             });
 
+        // === 3D Scene Pass ===
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
+                label: Some("3D Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -555,9 +590,28 @@ impl RenderState {
             }
         }
 
+        // === HUD Pass ===
+        let screen_descriptor = self.hud.screen_descriptor(&self.window);
+        let (paint_jobs, textures_delta) = self.hud.render(&self.window, metrics);
+
+        self.hud.paint(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &view,
+            screen_descriptor,
+            paint_jobs,
+            textures_delta,
+        );
+
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
         Ok(())
+    }
+
+    /// Get window reference
+    pub fn window(&self) -> &Window {
+        &self.window
     }
 }

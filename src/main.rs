@@ -20,9 +20,10 @@ use std::time::Instant;
 use anyhow::Result;
 use cell_simulator_x::{
     config::Parameters,
+    export::export_state_json,
     physics::{PhysicsConfig, PhysicsSolver},
     render::RenderState,
-    state::CellState,
+    state::{CellState, SimulationMetrics},
     MetabolismSolver, MetabolismConfig, MetabolitePool, MetaboliteIndices,
     HemoglobinSolver, HemoglobinState,
     STANDARD_PH, STANDARD_DPG_MM, STANDARD_PCO2_MMHG,
@@ -1201,6 +1202,14 @@ fn main() -> Result<()> {
     // Force application state
     let mut apply_force = false;
 
+    // Simulation metrics for HUD display
+    let mut metrics = SimulationMetrics::new();
+
+    // FPS tracking
+    let mut frame_count = 0u32;
+    let mut fps_timer = Instant::now();
+    let mut current_fps = 0.0f32;
+
     log::info!("Controls:");
     log::info!("  Mouse drag: Orbit camera");
     log::info!("  S: Toggle spectrin network");
@@ -1208,133 +1217,201 @@ fn main() -> Result<()> {
     log::info!("  P: Toggle physics simulation");
     log::info!("  F: Apply force to center vertex");
     log::info!("  +/-: Adjust physics substeps");
+    log::info!("  H: Toggle help overlay");
+    log::info!("  E: Toggle export menu");
+    log::info!("  M: Toggle metabolites panel");
+    log::info!("  D: Toggle disease panel");
+    log::info!("  Tab: Toggle HUD");
+    log::info!("  F12: Screenshot");
     log::info!("  Escape: Exit");
 
     event_loop.run(move |event, elwt| {
         elwt.set_control_flow(ControlFlow::Poll);
 
         match event {
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => {
-                    elwt.exit();
-                }
-                WindowEvent::KeyboardInput {
-                    event:
-                        KeyEvent {
-                            physical_key: PhysicalKey::Code(key_code),
-                            state: ElementState::Pressed,
-                            ..
-                        },
-                    ..
-                } => match key_code {
-                    KeyCode::Escape => elwt.exit(),
-                    KeyCode::KeyS => {
-                        show_spectrin = !show_spectrin;
-                        render_state.set_show_spectrin(show_spectrin);
-                        log::info!("Spectrin overlay: {}", show_spectrin);
+            Event::WindowEvent { ref event, .. } => {
+                // Pass events to HUD first
+                let hud_consumed = render_state.handle_event(event);
+
+                match event {
+                    WindowEvent::CloseRequested => {
+                        elwt.exit();
                     }
-                    KeyCode::KeyR => {
-                        render_state.camera.reset();
-                        log::info!("Camera reset");
-                    }
-                    KeyCode::KeyP => {
-                        physics_running = !physics_running;
-                        log::info!(
-                            "Physics simulation: {}",
-                            if physics_running { "RUNNING" } else { "PAUSED" }
-                        );
-                        if physics_running {
-                            last_physics_time = Instant::now();
-                        }
-                    }
-                    KeyCode::KeyF => {
-                        apply_force = !apply_force;
-                        if apply_force {
-                            // Find center vertex (closest to origin on upper surface)
-                            let mut min_dist = f32::MAX;
-                            let mut center_idx = 0;
-                            for (i, v) in cell_state.geometry.mesh.vertices.iter().enumerate() {
-                                let pos = v.position_vec3();
-                                // Only consider upper surface (z > 0)
-                                if pos.z > 0.0 {
-                                    let dist = pos.truncate().length();
-                                    if dist < min_dist {
-                                        min_dist = dist;
-                                        center_idx = i;
+                    WindowEvent::KeyboardInput {
+                        event:
+                            KeyEvent {
+                                physical_key: PhysicalKey::Code(key_code),
+                                state: ElementState::Pressed,
+                                ..
+                            },
+                        ..
+                    } => {
+                        // Skip if HUD consumed the event
+                        if !hud_consumed && !render_state.hud_wants_keyboard() {
+                            match key_code {
+                                KeyCode::Escape => elwt.exit(),
+                                KeyCode::KeyS => {
+                                    show_spectrin = !show_spectrin;
+                                    render_state.set_show_spectrin(show_spectrin);
+                                    log::info!("Spectrin overlay: {}", show_spectrin);
+                                }
+                                KeyCode::KeyR => {
+                                    render_state.camera.reset();
+                                    log::info!("Camera reset");
+                                }
+                                KeyCode::KeyP => {
+                                    physics_running = !physics_running;
+                                    log::info!(
+                                        "Physics simulation: {}",
+                                        if physics_running { "RUNNING" } else { "PAUSED" }
+                                    );
+                                    if physics_running {
+                                        last_physics_time = Instant::now();
                                     }
                                 }
+                                KeyCode::KeyF => {
+                                    apply_force = !apply_force;
+                                    if apply_force {
+                                        // Find center vertex (closest to origin on upper surface)
+                                        let mut min_dist = f32::MAX;
+                                        let mut center_idx = 0;
+                                        for (i, v) in cell_state.geometry.mesh.vertices.iter().enumerate() {
+                                            let pos = v.position_vec3();
+                                            // Only consider upper surface (z > 0)
+                                            if pos.z > 0.0 {
+                                                let dist = pos.truncate().length();
+                                                if dist < min_dist {
+                                                    min_dist = dist;
+                                                    center_idx = i;
+                                                }
+                                            }
+                                        }
+                                        // Apply persistent force (large enough for visible deformation)
+                                        let force = Vec3::new(0.0, 0.0, -100.0); // μN downward
+                                        physics_solver.apply_external_force(&mut cell_state.physics, center_idx, force);
+                                        log::info!("Applying {:.1} μN force to vertex {}", force.length(), center_idx);
+                                    } else {
+                                        physics_solver.clear_external_forces(&mut cell_state.physics);
+                                        log::info!("Force cleared");
+                                    }
+                                }
+                                KeyCode::Equal | KeyCode::NumpadAdd => {
+                                    physics_substeps = (physics_substeps + 5).min(100);
+                                    log::info!("Physics substeps: {}", physics_substeps);
+                                }
+                                KeyCode::Minus | KeyCode::NumpadSubtract => {
+                                    physics_substeps = (physics_substeps - 5).max(1);
+                                    log::info!("Physics substeps: {}", physics_substeps);
+                                }
+                                // HUD controls
+                                KeyCode::KeyH => {
+                                    render_state.hud.toggle_help();
+                                    log::info!("Help overlay: {}", render_state.hud.state.show_help);
+                                }
+                                KeyCode::KeyE => {
+                                    render_state.hud.toggle_export_menu();
+                                    log::info!("Export menu: {}", render_state.hud.state.show_export_menu);
+                                }
+                                KeyCode::KeyM => {
+                                    render_state.hud.toggle_metabolites();
+                                    log::info!("Metabolites panel: {}", render_state.hud.state.show_metabolites_panel);
+                                }
+                                KeyCode::KeyD => {
+                                    render_state.hud.toggle_disease();
+                                    log::info!("Disease panel: {}", render_state.hud.state.show_disease_panel);
+                                }
+                                KeyCode::Tab => {
+                                    render_state.hud.toggle_hud();
+                                    log::info!("HUD: {}", render_state.hud.state.hud_enabled);
+                                }
+                                KeyCode::F12 => {
+                                    // Export JSON state (screenshot would require additional framebuffer readback)
+                                    match export_state_json(&metrics) {
+                                        Ok(path) => log::info!("State exported to: {}", path.display()),
+                                        Err(e) => log::error!("Export failed: {}", e),
+                                    }
+                                }
+                                _ => {}
                             }
-                            // Apply persistent force (large enough for visible deformation)
-                            let force = Vec3::new(0.0, 0.0, -100.0); // μN downward
-                            physics_solver.apply_external_force(&mut cell_state.physics, center_idx, force);
-                            log::info!("Applying {:.1} μN force to vertex {}", force.length(), center_idx);
-                        } else {
-                            physics_solver.clear_external_forces(&mut cell_state.physics);
-                            log::info!("Force cleared");
                         }
                     }
-                    KeyCode::Equal | KeyCode::NumpadAdd => {
-                        physics_substeps = (physics_substeps + 5).min(100);
-                        log::info!("Physics substeps: {}", physics_substeps);
+                    WindowEvent::MouseInput { state, button, .. } => {
+                        if *button == MouseButton::Left {
+                            mouse_pressed = *state == ElementState::Pressed;
+                        }
                     }
-                    KeyCode::Minus | KeyCode::NumpadSubtract => {
-                        physics_substeps = (physics_substeps - 5).max(1);
-                        log::info!("Physics substeps: {}", physics_substeps);
+                    WindowEvent::Resized(new_size) => {
+                        render_state.resize(*new_size);
+                    }
+                    WindowEvent::RedrawRequested => {
+                        // Physics update
+                        if physics_running {
+                            let now = Instant::now();
+                            let _frame_time = (now - last_physics_time).as_secs_f32();
+                            last_physics_time = now;
+
+                            // External forces are now persistent (set via F key)
+
+                            // Run physics substeps
+                            for _ in 0..physics_substeps {
+                                physics_solver.step(
+                                    &mut cell_state.geometry.mesh,
+                                    &cell_state.geometry.spectrin_network,
+                                    &mut cell_state.physics,
+                                );
+                            }
+
+                            // Update render buffers with new mesh
+                            render_state.update_mesh(&cell_state.geometry.mesh);
+
+                            // Log physics stats occasionally
+                            if cell_state.physics.step_count % 1000 == 0 && cell_state.physics.step_count > 0 {
+                                log::info!(
+                                    "Physics step {}: time={:.3}ms, energy={:.4}pJ, max_vel={:.2}μm/s",
+                                    cell_state.physics.step_count,
+                                    cell_state.physics.simulation_time_sec * 1000.0,
+                                    cell_state.physics.total_energy_pJ(),
+                                    cell_state.physics.max_velocity_um_per_sec()
+                                );
+                            }
+                        }
+
+                        // Update FPS tracking
+                        frame_count += 1;
+                        let fps_elapsed = fps_timer.elapsed().as_secs_f32();
+                        if fps_elapsed >= 1.0 {
+                            current_fps = frame_count as f32 / fps_elapsed;
+                            frame_count = 0;
+                            fps_timer = Instant::now();
+                        }
+
+                        // Update simulation metrics for HUD
+                        metrics.simulation_time_sec = cell_state.physics.simulation_time_sec;
+                        metrics.fps = current_fps;
+                        metrics.steps_per_second = if physics_running {
+                            physics_substeps as f32 * current_fps
+                        } else {
+                            0.0
+                        };
+                        metrics.total_steps = cell_state.physics.step_count;
+                        metrics.physics_running = physics_running;
+                        metrics.physics_substeps = physics_substeps;
+                        metrics.total_energy_pJ = cell_state.physics.total_energy_pJ() as f64;
+                        metrics.max_velocity_um_per_sec = cell_state.physics.max_velocity_um_per_sec();
+                        metrics.update_status();
+
+                        // Render update
+                        render_state.update();
+                        match render_state.render_with_hud(&metrics) {
+                            Ok(_) => {}
+                            Err(wgpu::SurfaceError::Lost) => render_state.resize(render_state.size),
+                            Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
+                            Err(e) => log::error!("Render error: {:?}", e),
+                        }
                     }
                     _ => {}
-                },
-                WindowEvent::MouseInput { state, button, .. } => {
-                    if button == MouseButton::Left {
-                        mouse_pressed = state == ElementState::Pressed;
-                    }
                 }
-                WindowEvent::Resized(new_size) => {
-                    render_state.resize(new_size);
-                }
-                WindowEvent::RedrawRequested => {
-                    // Physics update
-                    if physics_running {
-                        let now = Instant::now();
-                        let _frame_time = (now - last_physics_time).as_secs_f32();
-                        last_physics_time = now;
-
-                        // External forces are now persistent (set via F key)
-
-                        // Run physics substeps
-                        for _ in 0..physics_substeps {
-                            physics_solver.step(
-                                &mut cell_state.geometry.mesh,
-                                &cell_state.geometry.spectrin_network,
-                                &mut cell_state.physics,
-                            );
-                        }
-
-                        // Update render buffers with new mesh
-                        render_state.update_mesh(&cell_state.geometry.mesh);
-
-                        // Log physics stats occasionally
-                        if cell_state.physics.step_count % 1000 == 0 && cell_state.physics.step_count > 0 {
-                            log::info!(
-                                "Physics step {}: time={:.3}ms, energy={:.4}pJ, max_vel={:.2}μm/s",
-                                cell_state.physics.step_count,
-                                cell_state.physics.simulation_time_sec * 1000.0,
-                                cell_state.physics.total_energy_pJ(),
-                                cell_state.physics.max_velocity_um_per_sec()
-                            );
-                        }
-                    }
-
-                    // Render update
-                    render_state.update();
-                    match render_state.render() {
-                        Ok(_) => {}
-                        Err(wgpu::SurfaceError::Lost) => render_state.resize(render_state.size),
-                        Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
-                        Err(e) => log::error!("Render error: {:?}", e),
-                    }
-                }
-                _ => {}
-            },
+            }
             Event::DeviceEvent {
                 event: DeviceEvent::MouseMotion { delta },
                 ..
