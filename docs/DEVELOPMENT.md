@@ -80,10 +80,42 @@ Ion Homeostasis:
 | Na/K pump | 0.0102 mM/s | 0.01-0.05 mM/s | ✅ |
 | ATP | 1.5-2.5 mM | 1.5-2.5 mM | ✅ |
 
-### Phase 7: (Next)
-- Disease models (malaria, sickle cell, storage lesion)
+### Phase 7: Disease Models ✅
+- **DiseaseModel Trait**: Unified interface for all disease models
+- **Storage Lesion Model**: Time-dependent RBC aging during blood storage
+  - ATP exponential decay (half-life 21 days)
+  - 2,3-DPG linear depletion (gone by day 14)
+  - Na+/K+ pump efficiency decay
+  - Passive leak conductance increase
+- **Diabetic RBC Model**: Hyperglycemia effects
+  - Elevated external glucose (5→10-15 mM)
+  - Oxidative stress 1.5x baseline
+  - HbA1c accumulation tracking
+- **Malaria Model**: P. falciparum infection effects
+  - Parasite stages: Ring (0.2x), Trophozoite (1.0x), Schizont (0.7x)
+  - Glucose competition and lactate production
+  - Oxidative stress 2x baseline
+- **Sickle Cell Model**: HbS polymerization
+  - P50 shift (26.8→31 mmHg)
+  - Polymerization kinetics below 35% O2 saturation
+  - Chronic oxidative stress 1.8x
+  - Genotypes: HbAA, HbAS (trait), HbSS (disease)
+- **CLI Integration**: `--diagnose-disease <model> --disease-param <value>`
+- **Validated**: 37 unit tests + 21 integration tests
+
+**Phase 7 Verified Results**:
+| Disease | Key Metric | Expected | Achieved | Status |
+|---------|------------|----------|----------|--------|
+| Storage (day 21) | ATP | ~1.0 mM | 1.0 mM | ✅ |
+| Storage (day 21) | 2,3-DPG | ~0 mM | 0.0 mM | ✅ |
+| Diabetic (15 mM) | Oxidative stress | 1.5x | 1.5x | ✅ |
+| Malaria (5%) | Lactate elevation | >baseline | Elevated | ✅ |
+| Sickle (HbSS) | P50 | 31 mmHg | 31.0 mmHg | ✅ |
+
+### Phase 8: (Next)
 - Full mechano-metabolic coupling
 - Volume regulation feedback
+- Documentation and polish
 
 ## Module Structure
 
@@ -103,7 +135,13 @@ src/
 │   ├── piezo1.rs            # Mechanosensitive Ca2+ channel (Phase 6a)
 │   ├── redox.rs             # RedoxSolver combining PPP+Glut+Piezo1
 │   ├── full_integration.rs  # FullyIntegratedSolver (38 metabolites)
-│   └── ion_homeostasis.rs   # Na+/K+-ATPase, ion transport (Phase 6b)
+│   ├── ion_homeostasis.rs   # Na+/K+-ATPase, ion transport (Phase 6b)
+│   └── disease/             # Disease models (Phase 7)
+│       ├── mod.rs           # DiseaseModel trait, registry
+│       ├── storage_lesion.rs  # Blood storage aging
+│       ├── diabetic.rs      # Hyperglycemia effects
+│       ├── malaria.rs       # P. falciparum infection
+│       └── sickle_cell.rs   # HbS polymerization
 ├── render/         # WebGPU/Metal rendering
 ├── config/         # Parameters, JSON loading
 └── state/          # Cell state management
@@ -161,6 +199,32 @@ cargo run -- --diagnose-full -d 300              # Longer simulation
 - FullyIntegratedSolver: 35 metabolites across all subsystems
 - Validates: ATP (1.5-2.5 mM), NADPH/NADP+ (10-20), GSH/GSSG (>50), H2O2 (<5 µM)
 - Coupling: G6P → PPP → NADPH → GR → GSH → GPx → H2O2 detox
+
+### Disease Model Diagnostics (Phase 7)
+```bash
+# Storage Lesion (blood storage aging)
+cargo run -- --diagnose-disease storage --disease-param 0     # Day 0 (fresh)
+cargo run -- --diagnose-disease storage --disease-param 21    # Day 21 (half-life)
+cargo run -- --diagnose-disease storage --disease-param 42    # Day 42 (expiration)
+
+# Diabetic RBC (hyperglycemia)
+cargo run -- --diagnose-disease diabetic --disease-param 5    # Normal glucose
+cargo run -- --diagnose-disease diabetic --disease-param 12   # Diabetic glucose
+cargo run -- --diagnose-disease diabetic --disease-param 15   # Severe hyperglycemia
+
+# Malaria (P. falciparum)
+cargo run -- --diagnose-disease malaria --disease-param 0.01  # 1% parasitemia (mild)
+cargo run -- --diagnose-disease malaria --disease-param 0.05  # 5% parasitemia (moderate)
+cargo run -- --diagnose-disease malaria --disease-param 0.10  # 10% parasitemia (severe)
+
+# Sickle Cell Disease
+cargo run -- --diagnose-disease sickle --disease-param 0.0    # HbAA (normal)
+cargo run -- --diagnose-disease sickle --disease-param 0.4    # HbAS (trait)
+cargo run -- --diagnose-disease sickle --disease-param 1.0 --po2 40  # HbSS at low O2
+```
+- Disease-specific modifications to solver config
+- Time-dependent effects (storage aging, polymerization)
+- Validates against literature targets for each disease
 
 ## GUI Controls
 

@@ -1,0 +1,118 @@
+{
+  "_description": "Sickle Cell Disease (HbS) parameters",
+  "_citations": {
+    "polymerization": "Eaton WA, Hofrichter J. Blood. 1987;70:1245-1266",
+    "p50_shift": "Bunn HF. N Engl J Med. 1997;337:762-769",
+    "kinetics": "Ferrone FA. J Mol Biol. 2004;341:843-855",
+    "oxidative_stress": "Hebbel RP et al. Semin Hematol. 1990;27:51-69"
+  },
+  "_units": {
+    "p50": "mmHg",
+    "saturation": "fraction (0-1)",
+    "rates": "per second"
+  },
+
+  "hbs_p50_mmHg": {
+    "value": 31.0,
+    "_comment": "P50 for HbS (lower O2 affinity than HbA)",
+    "_reference": "Eaton 1987"
+  },
+
+  "hbs_hill_coefficient": {
+    "value": 2.6,
+    "_comment": "Slightly reduced cooperativity for HbS",
+    "_reference": "Bunn 1997"
+  },
+
+  "hba_p50_mmHg": {
+    "value": 26.8,
+    "_comment": "Normal HbA P50 for comparison"
+  },
+
+  "polymerization_critical_saturation": {
+    "value": 0.35,
+    "_comment": "O2 saturation below which polymerization begins",
+    "_reference": "Eaton 1987"
+  },
+
+  "polymerization_rate_per_sec": {
+    "value": 0.1,
+    "_comment": "Rate constant for polymer formation after nucleation"
+  },
+
+  "depolymerization_rate_per_sec": {
+    "value": 0.5,
+    "_comment": "Rate constant for polymer dissolution upon reoxygenation"
+  },
+
+  "delay_time_exponent": {
+    "value": 15.0,
+    "_comment": "Cooperative nucleation exponent (delay ~ [HbS]^-15)",
+    "_reference": "Ferrone 2004"
+  },
+
+  "stiffness_multiplier_full_polymer": {
+    "value": 10.0,
+    "_comment": "Sickled cells are ~10x stiffer than normal",
+    "_reference": "Evans 1984"
+  },
+
+  "chronic_oxidative_stress": {
+    "value": 1.8,
+    "_comment": "Baseline oxidative stress multiplier for HbSS",
+    "_reference": "Hebbel 1990"
+  },
+
+  "nadph_consumption_sickling": {
+    "value": 0.0002,
+    "_comment": "Additional NADPH consumption during sickling (mM/s)"
+  },
+
+  "genotypes": {
+    "_description": "HbS fraction by genotype",
+    "HbAA": {
+      "hbs_fraction": 0.0,
+      "clinical": "Normal"
+    },
+    "HbAS": {
+      "hbs_fraction": [0.30, 0.45],
+      "clinical": "Sickle trait (carrier, usually asymptomatic)"
+    },
+    "HbSC": {
+      "hbs_fraction": [0.45, 0.55],
+      "clinical": "Sickle-hemoglobin C disease (moderate)"
+    },
+    "HbS_beta_thal": {
+      "hbs_fraction": [0.60, 0.90],
+      "clinical": "Sickle-beta thalassemia (variable severity)"
+    },
+    "HbSS": {
+      "hbs_fraction": [0.90, 1.0],
+      "clinical": "Sickle cell disease (severe)"
+    }
+  },
+
+  "validation_targets": {
+    "_description": "Expected oxygen binding parameters by genotype",
+    "HbAA": {
+      "p50_mmHg": 26.8,
+      "polymerization_at_pO2_40": "none"
+    },
+    "HbAS": {
+      "p50_mmHg": [27.5, 28.5],
+      "polymerization_at_pO2_40": "minimal"
+    },
+    "HbSS": {
+      "p50_mmHg": [30.0, 32.0],
+      "polymerization_at_pO2_40": "significant"
+    }
+  },
+
+  "clinical_triggers": {
+    "_description": "Conditions that can precipitate sickling crisis",
+    "hypoxia_pO2_threshold_mmHg": 40,
+    "dehydration_effect": "increases intracellular HbS concentration",
+    "acidosis_effect": "further right-shifts OEC",
+    "temperature_effect": "fever increases metabolism"
+  }
+}

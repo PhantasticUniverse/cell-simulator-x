@@ -30,7 +30,10 @@ use cell_simulator_x::{
     // Phase 6: Redox metabolism
     RedoxSolver, RedoxConfig, RedoxIndices, initialize_redox_metabolites,
     // Phase 6b: Fully integrated solver
+    FullyIntegratedSolver, FullyIntegratedConfig,
     run_full_integration_diagnostics,
+    // Phase 7: Disease models
+    DiseaseRegistry, DiseaseModel,
 };
 use glam::Vec3;
 use winit::{
@@ -199,6 +202,8 @@ struct CliArgs {
     diagnose_integrated: bool,
     diagnose_redox: bool,
     diagnose_full: bool,
+    diagnose_disease: Option<String>,
+    disease_param: f64,
     steps: usize,
     force: f32,
     duration_sec: f64,
@@ -225,6 +230,8 @@ impl Default for CliArgs {
             diagnose_integrated: false,
             diagnose_redox: false,
             diagnose_full: false,
+            diagnose_disease: None,
+            disease_param: 0.0,
             steps: 1000,
             force: 5.0,
             duration_sec: 60.0,  // 60 seconds default for metabolism
@@ -255,6 +262,18 @@ fn parse_args() -> CliArgs {
             "--diagnose-integrated" => cli.diagnose_integrated = true,
             "--diagnose-redox" => cli.diagnose_redox = true,
             "--diagnose-full" => cli.diagnose_full = true,
+            "--diagnose-disease" => {
+                i += 1;
+                if i < args.len() {
+                    cli.diagnose_disease = Some(args[i].clone());
+                }
+            }
+            "--disease-param" => {
+                i += 1;
+                if i < args.len() {
+                    cli.disease_param = args[i].parse().unwrap_or(0.0);
+                }
+            }
             "-n" | "--steps" => {
                 i += 1;
                 if i < args.len() {
@@ -339,9 +358,10 @@ fn parse_args() -> CliArgs {
                 println!("  --diagnose-integrated  Run integrated metabolism-oxygen diagnostics (no GUI)");
                 println!("  --diagnose-redox       Run redox/antioxidant diagnostics (no GUI)");
                 println!("  --diagnose-full        Run fully integrated diagnostics (glycolysis+PPP+Hb) (no GUI)");
+                println!("  --diagnose-disease D   Run disease model diagnostics (storage|diabetic|malaria|sickle)");
                 println!("  -n, --steps N          Number of physics steps (default: 1000)");
                 println!("  -f, --force F          Force magnitude in μN (default: 5.0)");
-                println!("  -d, --duration D       Duration in seconds for metabolism/integrated/redox/full (default: 60.0)");
+                println!("  -d, --duration D       Duration in seconds for metabolism/integrated/redox/full/disease (default: 60.0)");
                 println!("  --glucose-step G       Apply glucose step change at 50% duration");
                 println!();
                 println!("Oxygen diagnostics options:");
@@ -356,7 +376,20 @@ fn parse_args() -> CliArgs {
                 println!("  --oxidative-stress M   Oxidative stress multiplier (default: 1.0)");
                 println!("  --tension T            Membrane tension in pN/nm (default: 0.0)");
                 println!();
+                println!("Disease diagnostics options:");
+                println!("  --disease-param P      Disease-specific parameter:");
+                println!("                           storage: days (0-42)");
+                println!("                           diabetic: glucose mM (5-20)");
+                println!("                           malaria: parasitemia fraction (0.01-0.10)");
+                println!("                           sickle: HbS fraction (0-1.0)");
+                println!();
                 println!("  --help, -h             Show this help");
+                println!();
+                println!("Disease model examples:");
+                println!("  cargo run -- --diagnose-disease storage --disease-param 21 -d 60");
+                println!("  cargo run -- --diagnose-disease diabetic --disease-param 12 -d 120");
+                println!("  cargo run -- --diagnose-disease malaria --disease-param 0.05 -d 60");
+                println!("  cargo run -- --diagnose-disease sickle --disease-param 1.0 --po2 40 -d 60");
                 std::process::exit(0);
             }
             _ => {}
@@ -757,6 +790,144 @@ fn run_redox_diagnostics(duration_sec: f64, oxidative_stress: f64, membrane_tens
     Ok(())
 }
 
+/// Run disease model diagnostics without GUI
+fn run_disease_diagnostics(
+    disease_name: &str,
+    disease_param: f64,
+    duration_sec: f64,
+    po2_mmHg: f64,
+) -> Result<()> {
+    println!("=== Cell Simulator X - Disease Model Diagnostics ===\n");
+
+    // Create disease model from registry
+    let mut disease_model = match DiseaseRegistry::create(disease_name, disease_param) {
+        Some(model) => model,
+        None => {
+            println!("Unknown disease model: '{}'", disease_name);
+            println!("\nAvailable models:");
+            for name in DiseaseRegistry::list_models() {
+                if let Some(help) = DiseaseRegistry::help(name) {
+                    println!("\n  {}:", name);
+                    for line in help.lines() {
+                        println!("    {}", line);
+                    }
+                }
+            }
+            return Ok(());
+        }
+    };
+
+    println!("Disease Model: {}", disease_model.name());
+    println!("Description: {}", disease_model.description());
+    println!();
+
+    // Create solver and modify config with disease effects
+    let mut config = FullyIntegratedConfig::default();
+    config.po2_mmHg = po2_mmHg;
+    disease_model.modify_config(&mut config);
+
+    println!("Modified Configuration:");
+    println!("  pO2:              {:.0} mmHg", config.po2_mmHg);
+    println!("  Oxidative stress: {:.2}x", config.oxidative_stress_multiplier);
+    println!("  External glucose: {:.1} mM", config.external_glucose_mM);
+    println!();
+
+    let mut solver = FullyIntegratedSolver::new(config.clone());
+    let mut metabolites = MetabolitePool::default_fully_integrated();
+    let indices = solver.indices;
+
+    // Initial state
+    println!("Initial State:");
+    println!("  ATP:       {:.3} mM", metabolites.get(indices.glycolysis.atp));
+    println!("  2,3-DPG:   {:.3} mM", metabolites.get(indices.bisphosphoglycerate_2_3));
+    println!("  Glucose:   {:.3} mM", metabolites.get(indices.glycolysis.glucose));
+    println!("  Lactate:   {:.3} mM", metabolites.get(indices.glycolysis.lactate));
+    println!("  GSH:       {:.3} mM", metabolites.get(indices.redox.gsh));
+    println!("  Na+:       {:.1} mM", metabolites.get(indices.ions.na_plus_cytosolic));
+    println!("  K+:        {:.1} mM", metabolites.get(indices.ions.k_plus_cytosolic));
+    println!();
+
+    // Run simulation with progress reporting
+    println!("--- Running {:.1} second simulation ---\n", duration_sec);
+    println!("{:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "Time(s)", "ATP", "DPG", "Lactate", "GSH", "Na+", "K+");
+    println!("{}", "-".repeat(64));
+
+    let start = Instant::now();
+    let report_interval = duration_sec / 10.0;
+    let mut next_report = 0.0;
+
+    let dt = solver.config.dt_sec;
+    let n_steps = (duration_sec / dt).ceil() as usize;
+
+    for step in 0..n_steps {
+        let t = step as f64 * dt;
+
+        // Report at intervals
+        if t >= next_report {
+            println!("{:8.2} {:8.3} {:8.3} {:8.3} {:8.3} {:8.1} {:8.1}",
+                t,
+                metabolites.get(indices.glycolysis.atp),
+                metabolites.get(indices.bisphosphoglycerate_2_3),
+                metabolites.get(indices.glycolysis.lactate),
+                metabolites.get(indices.redox.gsh),
+                metabolites.get(indices.ions.na_plus_cytosolic),
+                metabolites.get(indices.ions.k_plus_cytosolic));
+            next_report += report_interval;
+        }
+
+        // Step the base solver
+        solver.step(&mut metabolites, 0.0);
+
+        // Apply disease-specific time effects
+        disease_model.apply_time_effects(&mut solver, &mut metabolites, t);
+
+        // Apply disease-specific derivative modifications (already handled in step, but
+        // we need to apply any additional effects that modify concentrations directly)
+    }
+
+    let elapsed = start.elapsed();
+
+    // Final state
+    println!();
+    let final_diag = solver.diagnostics(&metabolites);
+    final_diag.print_summary();
+
+    // Disease-specific diagnostics
+    println!();
+    let disease_diag = disease_model.diagnostics(&metabolites);
+    disease_diag.print_summary();
+
+    // Validation
+    println!("\n=== Validation Checks ===\n");
+    let warnings = solver.validate_state(&metabolites);
+    if warnings.is_empty() {
+        println!("Base validation: All parameters within physiological range");
+    } else {
+        println!("Base validation warnings:");
+        for warning in &warnings {
+            println!("  {}", warning);
+        }
+    }
+
+    if !disease_diag.warnings.is_empty() {
+        println!("\nDisease-specific warnings:");
+        for warning in &disease_diag.warnings {
+            println!("  {}", warning);
+        }
+    }
+
+    // Performance
+    println!();
+    println!("=== Performance ===");
+    println!("Wall clock time: {:.2?}", elapsed);
+    println!("Simulation time: {:.2} s", solver.time_sec);
+    println!("Steps: {}", n_steps);
+    println!("Steps/second: {:.0}", n_steps as f32 / elapsed.as_secs_f32());
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -792,6 +963,15 @@ fn main() -> Result<()> {
             cli.po2_mmHg,
         );
         return Ok(());
+    }
+
+    if let Some(ref disease_name) = cli.diagnose_disease {
+        return run_disease_diagnostics(
+            disease_name,
+            cli.disease_param,
+            cli.duration_sec,
+            cli.po2_mmHg,
+        );
     }
 
     log::info!("Cell Simulator X starting...");

@@ -13,6 +13,10 @@ cargo run -- --diagnose-metabolism   # Metabolism diagnostics (CLI)
 cargo run -- --diagnose-oxygen       # Oxygen transport diagnostics (CLI)
 cargo run -- --diagnose-integrated   # Metabolism-oxygen coupling (CLI)
 cargo run -- --diagnose-full         # Full integration (glycolysis+PPP+redox)
+cargo run -- --diagnose-disease storage --disease-param 21    # Storage lesion (day 21)
+cargo run -- --diagnose-disease diabetic --disease-param 12   # Diabetic (12 mM glucose)
+cargo run -- --diagnose-disease malaria --disease-param 0.05  # Malaria (5% parasitemia)
+cargo run -- --diagnose-disease sickle --disease-param 1.0    # Sickle cell (HbSS)
 cargo run -- --help                  # Full CLI options
 ```
 
@@ -29,6 +33,7 @@ cargo run -- --help                  # Full CLI options
 | `geometry` | RBC mesh, spectrin network |
 | `physics` | Membrane mechanics, DPD, WLC |
 | `biochemistry` | Glycolysis, PPP, glutathione, hemoglobin, pH buffer, ion homeostasis, full integration |
+| `biochemistry/disease` | Disease models: storage lesion, diabetic, malaria, sickle cell |
 
 ## Current Status
 
@@ -39,6 +44,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 5: Metabolism-Oxygen Integration ✅
 - Phase 6a: Redox Metabolism ✅ (PPP, Glutathione, Piezo1)
 - Phase 6b: Ion Homeostasis ✅ (Na+/K+-ATPase, PMCA)
+- Phase 7: Disease Models ✅ (Storage Lesion, Diabetic, Malaria, Sickle Cell)
 
 ## Development
 

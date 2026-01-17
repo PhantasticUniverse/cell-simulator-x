@@ -1,0 +1,77 @@
+{
+  "_description": "Storage Lesion parameters for blood bank RBC storage (0-42 days)",
+  "_citations": {
+    "atp_decay": "Hess JR. Transfusion. 2010;50:2200-2214",
+    "dpg_depletion": "Zimrin AB, Hess JR. Transfus Med. 2009;19:175-182",
+    "pump_decay": "Luten M et al. Transfusion. 2008;48:1478-1485",
+    "oxidative_stress": "Dumaswala UJ et al. Blood. 1999;93:2809-2816"
+  },
+  "_units": {
+    "half_life": "days",
+    "loss_rate": "mM/day",
+    "decay_rate": "1/day (fractional)",
+    "increase_rate": "1/day (fractional)"
+  },
+
+  "atp_decay_half_life_days": {
+    "value": 21.0,
+    "_comment": "ATP decreases exponentially with ~21 day half-life",
+    "_reference": "Hess 2010: ATP ~50% at day 21"
+  },
+
+  "dpg_loss_rate_mM_per_day": {
+    "value": 0.4,
+    "_comment": "2,3-DPG depletes linearly at ~0.4 mM/day",
+    "_reference": "Zimrin 2009: 2,3-DPG gone by day 14"
+  },
+
+  "pump_efficiency_decay_per_day": {
+    "value": 0.02,
+    "_comment": "Na+/K+-ATPase Vmax decreases ~2%/day",
+    "_reference": "Luten 2008"
+  },
+
+  "leak_increase_per_day": {
+    "value": 0.015,
+    "_comment": "Passive ion leak conductance increases ~1.5%/day",
+    "_reference": "Luten 2008"
+  },
+
+  "oxidative_stress_increase_per_day": {
+    "value": 0.03,
+    "_comment": "Oxidative stress markers increase ~3%/day",
+    "_reference": "Dumaswala 1999"
+  },
+
+  "initial_atp_mM": {
+    "value": 2.0,
+    "_comment": "Fresh RBC ATP concentration"
+  },
+
+  "initial_dpg_mM": {
+    "value": 5.0,
+    "_comment": "Fresh RBC 2,3-DPG concentration"
+  },
+
+  "validation_targets": {
+    "_description": "Expected metabolite values at key storage times",
+    "day_0": {
+      "atp_mM": 2.0,
+      "dpg_mM": 5.0,
+      "na_mM": 10,
+      "k_mM": 140
+    },
+    "day_14": {
+      "atp_mM": [1.4, 1.6],
+      "dpg_mM": [0, 1.0],
+      "na_mM": [20, 30],
+      "k_mM": [115, 125]
+    },
+    "day_42": {
+      "atp_mM": [0.4, 0.6],
+      "dpg_mM": 0.0,
+      "na_mM": [50, 70],
+      "k_mM": [80, 100]
+    }
+  }
+}

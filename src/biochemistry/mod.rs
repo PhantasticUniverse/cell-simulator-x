@@ -28,6 +28,7 @@
 //! - Beutler E. Red Cell Metabolism. 1984
 //! - Meister A, Anderson ME. Annu Rev Biochem. 1983;52:711-760
 
+pub mod disease;
 pub mod enzyme;
 pub mod full_integration;
 pub mod glycolysis;
@@ -42,6 +43,13 @@ pub mod piezo1;
 pub mod rapoport_luebering;
 pub mod redox;
 
+pub use disease::{
+    DiseaseModel, DiseaseDiagnostics, DiseaseRegistry,
+    StorageLesionModel, StorageLesionConfig,
+    DiabeticModel, DiabeticConfig,
+    MalariaModel, MalariaConfig, ParasiteStage,
+    SickleCellModel, SickleCellConfig,
+};
 pub use enzyme::{Enzyme, ReactionStoichiometry};
 pub use glycolysis::{GlycolysisSolver, MetaboliteIndices};
 pub use glutathione::{GlutathioneCycle, GlutathionePeroxidase, GlutathioneReductase, BASAL_H2O2_PRODUCTION_MM_PER_SEC};

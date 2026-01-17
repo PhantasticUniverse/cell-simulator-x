@@ -17,7 +17,7 @@ pub mod state;
 pub use biochemistry::{
     MetabolismSolver, MetabolismConfig, MetabolitePool, MetabolismDiagnostics,
     ExtendedMetaboliteIndices, MetaboliteIndices,
-    HemoglobinSolver, HemoglobinState, OxygenDiagnostics,
+    HemoglobinSolver, HemoglobinState, OxygenDiagnostics, AdairConstants,
     STANDARD_PH, STANDARD_TEMPERATURE_K, STANDARD_DPG_MM, STANDARD_PCO2_MMHG,
     // Phase 5: Metabolism-Oxygen Integration
     IntegratedSolver, IntegratedDiagnostics, IntegratedEnvironment, PhBufferModel,
@@ -32,6 +32,12 @@ pub use biochemistry::{
     // Phase 6b: Ion Homeostasis
     IonIndices, IonHomeostasisSystem, IonHomeostasisConfig, IonDiagnostics, NaKATPase,
     initialize_ion_metabolites,
+    // Phase 7: Disease Models
+    DiseaseModel, DiseaseDiagnostics, DiseaseRegistry,
+    StorageLesionModel, StorageLesionConfig,
+    DiabeticModel, DiabeticConfig,
+    MalariaModel, MalariaConfig, ParasiteStage,
+    SickleCellModel, SickleCellConfig,
 };
 pub use config::Parameters;
 pub use geometry::{Mesh, SpectrinNetwork};

@@ -1,0 +1,92 @@
+{
+  "_description": "Malaria (P. falciparum) infection parameters",
+  "_citations": {
+    "glucose_consumption": "Roth EF Jr et al. Blood. 1990;76:1151-1158",
+    "lactate_production": "Sherman IW. Microbiol Rev. 1979;43:453-495",
+    "metabolism": "Zolg JW et al. J Biol Chem. 1984;259:8545-8551",
+    "clinical": "White NJ. N Engl J Med. 2014;371:1407-1417"
+  },
+  "_units": {
+    "rates": "mM/s at 100% parasitemia, trophozoite stage",
+    "parasitemia": "fraction (0.01 = 1%)"
+  },
+
+  "glucose_consumption_mM_per_sec": {
+    "value": 0.5,
+    "_comment": "Parasite glycolysis ~100x faster than normal RBC",
+    "_reference": "Roth 1990"
+  },
+
+  "lactate_production_mM_per_sec": {
+    "value": 1.0,
+    "_comment": "~2 lactate per glucose (no oxidative phosphorylation)",
+    "_reference": "Sherman 1979"
+  },
+
+  "oxidative_stress_multiplier": {
+    "value": 2.0,
+    "_comment": "Heme release from Hb digestion generates ROS",
+    "_reference": "Zolg 1984"
+  },
+
+  "atp_consumption_factor": {
+    "value": 0.1,
+    "_comment": "Parasite ATP consumption (fraction per 100% parasitemia)"
+  },
+
+  "hb_destruction_rate_per_sec": {
+    "value": 0.001,
+    "_comment": "Hemoglobin destruction rate for amino acid synthesis"
+  },
+
+  "parasite_stages": {
+    "_description": "Metabolic activity by developmental stage",
+    "ring": {
+      "hours_post_invasion": [0, 20],
+      "metabolic_multiplier": 0.2,
+      "_comment": "Early stage, low metabolism"
+    },
+    "trophozoite": {
+      "hours_post_invasion": [20, 36],
+      "metabolic_multiplier": 1.0,
+      "_comment": "Peak growth, maximum metabolism"
+    },
+    "schizont": {
+      "hours_post_invasion": [36, 48],
+      "metabolic_multiplier": 0.7,
+      "_comment": "Pre-rupture, decreased metabolism"
+    }
+  },
+
+  "clinical_thresholds": {
+    "_description": "Parasitemia thresholds for severity classification",
+    "mild": [0, 0.01],
+    "moderate": [0.01, 0.05],
+    "severe": [0.05, 0.10],
+    "hyperparasitemia": [0.10, 1.0]
+  },
+
+  "validation_targets": {
+    "_description": "Expected metabolite values at different parasitemia levels",
+    "normal_0pct": {
+      "atp_mM": 2.0,
+      "lactate_mM": 1.5,
+      "ph": 7.4
+    },
+    "mild_1pct": {
+      "atp_mM": [1.6, 2.0],
+      "lactate_mM": [2, 4],
+      "ph": [7.2, 7.4]
+    },
+    "moderate_5pct": {
+      "atp_mM": [1.2, 1.8],
+      "lactate_mM": [6, 10],
+      "ph": [7.0, 7.2]
+    },
+    "severe_10pct": {
+      "atp_mM": [0.8, 1.2],
+      "lactate_mM": [12, 18],
+      "ph": [6.8, 7.0]
+    }
+  }
+}

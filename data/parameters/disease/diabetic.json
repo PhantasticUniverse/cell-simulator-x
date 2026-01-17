@@ -1,0 +1,69 @@
+{
+  "_description": "Diabetic RBC parameters for hyperglycemia effects",
+  "_citations": {
+    "oxidative_stress": "Giugliano D et al. Diabetes Care. 1996;19:257-267",
+    "glycation": "Bunn HF et al. J Clin Invest. 1981;67:1361-1369",
+    "glucose_autoxidation": "Wolff SP. Br Med Bull. 1993;49:642-652",
+    "polyol_pathway": "Brownlee M. Nature. 2001;414:813-820"
+  },
+  "_units": {
+    "glucose": "mM (millimolar)",
+    "stress_multiplier": "dimensionless (fold increase)",
+    "rate": "per day or per second as noted"
+  },
+
+  "oxidative_stress_multiplier": {
+    "value": 1.5,
+    "_comment": "Oxidative stress ~1.5x normal in diabetic RBCs",
+    "_reference": "Giugliano 1996"
+  },
+
+  "glycation_rate_per_mM_glucose_per_day": {
+    "value": 0.0001,
+    "_comment": "HbA1c formation rate ~0.01%/day per mM excess glucose",
+    "_reference": "Bunn 1981"
+  },
+
+  "nadph_consumption_per_mM_excess_glucose": {
+    "value": 0.0001,
+    "_comment": "Additional NADPH consumption from polyol pathway (mM/s)",
+    "_reference": "Brownlee 2001"
+  },
+
+  "gsh_oxidation_multiplier": {
+    "value": 1.3,
+    "_comment": "GSH oxidation rate multiplier at elevated glucose",
+    "_reference": "Wolff 1993"
+  },
+
+  "normal_glucose_mM": {
+    "value": 5.0,
+    "_comment": "Euglycemic plasma glucose level"
+  },
+
+  "glucose_levels": {
+    "_description": "Clinical glucose classifications",
+    "normal": [4.0, 5.5],
+    "impaired_fasting": [5.6, 6.9],
+    "diabetic": [7.0, 20.0]
+  },
+
+  "validation_targets": {
+    "_description": "Expected redox values at different glucose levels",
+    "normal_5mM": {
+      "gsh_gssg_ratio": [200, 400],
+      "h2o2_uM": [0, 5],
+      "nadph_nadp_ratio": [10, 20]
+    },
+    "mild_10mM": {
+      "gsh_gssg_ratio": [100, 200],
+      "h2o2_uM": [5, 10],
+      "nadph_nadp_ratio": [8, 12]
+    },
+    "severe_15mM": {
+      "gsh_gssg_ratio": [50, 100],
+      "h2o2_uM": [10, 20],
+      "nadph_nadp_ratio": [5, 10]
+    }
+  }
+}
