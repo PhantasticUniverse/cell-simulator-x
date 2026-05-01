@@ -86,30 +86,76 @@ Persistent `PhysicsBackend` caching is deferred to Phase 11.3.E together
 with the multi-substep mega-pass. The kernels themselves are stable and
 won't change shape; the host wrapper layer is what gets the cache.
 
+## Phase 11.3.E — Integrated pipeline (closed)
+
+The integration layer landed. New module: `PhysicsBackend` (in
+`src/compute/physics.rs`) owns:
+
+- All persistent buffers (positions, velocities, forces, mesh elements,
+  CSR adjacency, WLC baseline, scratch).
+- All compiled compute pipelines.
+- A single `step()` method that dispatches six kernels in one
+  `ComputePass`, mirroring `PhysicsSolver::step` exactly.
+
+### How the six dispatches map to the CPU pipeline
+
+| # | Kernel | CPU equivalent | Threads |
+|---|--------|----------------|---------|
+| 1 | `verlet_half_step_velocity` | `integrator.half_step_velocity(forces)` | n_vertices |
+| 2 | `verlet_step_position` | `integrator.step_position(velocities)` | n_vertices |
+| 3 | `skalak_per_element` | `skalak.compute_forces` (inner loop) | n_elements |
+| 4 | `skalak_init_from_baseline` | scatter + WLC contribution | n_vertices |
+| 5 | `dpd_add` | `dpd.compute_membrane_forces_pcg` | n_vertices |
+| 6 | `damping_and_half_step` | `forces -= vel*damping` + final half | n_vertices |
+
+### WLC is a static baseline, not a per-substep dispatch
+
+Looking at `WLCSolver::compute_forces`, it reads `network.nodes[i].position`
+which never updates as the mesh moves (the spectrin network struct is
+borrowed `&immutable` throughout the simulation). WLC therefore contributes
+a **constant force per substep** — equal to its initial value. Phase 11.3.E
+exploits this: at backend creation we run the existing `run_wlc_forces`
+once, project the per-spectrin-node forces into per-mesh-vertex
+contributions via `mesh_vertex_idx`, and store the result in a
+`wlc_baseline` storage buffer. Every substep folds it back in by having
+`skalak_init_from_baseline` initialize `forces[v] = wlc_baseline[v]` before
+adding the Skalak aggregate. No per-substep WLC kernel is required.
+
+(If a future change moves spectrin nodes with the mesh, this baseline
+buffer becomes per-substep instead — but as the CPU code stands today,
+the static baseline matches CPU semantics exactly.)
+
+### Parity result
+
+`tests/physics_backend_parity.rs::physics_backend_cpu_gpu_parity` runs
+the full CPU `PhysicsSolver::step`-equivalent loop (with PCG-DPD on both
+sides for determinism) and the GPU `PhysicsBackend.step()` for 10 substeps
+each. Worst |Δpos| = **1.9e-15 μm** (essentially f64 noise on near-zero
+y-coordinates; non-trivial axes match bit-identically), worst |Δvel| =
+**8.3e-10 μm/s** — well below the 1e-3 threshold.
+
+This is the integrated physics pipeline running end-to-end on the GPU
+with bit-near-perfect agreement against CPU. From here, Phase 11.3.F (or
+the eventual N-cell scaling phase) can drive multiple substeps via a
+host-side `for _ in 0..N { backend.step() }` loop with no readback.
+
 ## What's still on the floor
 
-Phase 11.3 in the original plan called for "all dispatched inside a single
-`ComputePass` per substep." That **integrated** dispatch is genuinely the
-hard part — it requires:
-
-1. **Persistent buffers** for positions, velocities, forces, all topology
-   data. Allocated once, reused across substeps.
-2. **A force-zero kernel** at the start of each substep (or built into
-   one of the existing force kernels).
-3. **Topology coupling between mesh and spectrin** — the CPU code maps
-   spectrin nodes to mesh vertices via `node.mesh_vertex_idx`. The GPU
-   needs the same mapping uploaded as a uniform/buffer.
-4. **A multi-substep loop** that re-runs the whole pipeline N times
-   without CPU intervention. wgpu dispatches inside one `ComputePass` get
-   automatic barriers; multiple compute passes are also fine but each
-   adds dispatch latency.
-5. **Membrane damping** (a per-vertex `force -= velocity * damping` step)
-   that we elided from the per-component kernels — needs a dedicated pass
-   or to be folded into the integrator.
-
-That's "Phase 11.3.E" in the next pass. After 11.3.E, the speedup gate
-from the Phase 11 plan (≥10× wall-clock at N=100 cells vs CPU baseline)
-becomes measurable — until then, the per-call dispatch overhead dominates.
+- **Persistent multi-substep dispatch** — currently the host calls
+  `backend.step()` N times. Each call submits its own command encoder,
+  which has ~µs of dispatch latency. For 1000 substeps/sec at typical
+  settings that's ~1 ms of overhead — negligible at single-cell N=1, but
+  worth measuring at multi-cell scale.
+- **Multi-cell support** — `PhysicsBackend` is single-cell (one mesh,
+  one spectrin network). Multi-cell scaling requires either many backends
+  or a single backend with an outer "cell" axis on every buffer.
+- **Render-compute buffer sharing** (Phase 11.4) — currently the only way
+  to visualize is `read_state()` followed by uploading positions to the
+  render path. Direct buffer sharing eliminates that round-trip.
+- **Mesh normals recomputation** — the CPU side calls `recompute_normals`
+  after `step_position` for diagnostic / rendering use. The GPU pipeline
+  doesn't yet update normals; positions are correct, but if normals are
+  needed the host must re-derive them after `read_state`.
 
 ## Numerical precision retrospective
 

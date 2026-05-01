@@ -21,6 +21,7 @@ const KERNEL_WLC_WGSL: &str = include_str!("../../shaders/compute/wlc.wgsl");
 const KERNEL_DPD_WGSL: &str = include_str!("../../shaders/compute/dpd.wgsl");
 const KERNEL_INTEGRATOR_WGSL: &str =
     include_str!("../../shaders/compute/integrator.wgsl");
+const KERNEL_STEP_WGSL: &str = include_str!("../../shaders/compute/physics_step.wgsl");
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -1141,4 +1142,472 @@ pub fn run_verlet_step(
     buf_vel_staging.unmap();
 
     Ok(())
+}
+
+// =============================================================================
+// Phase 11.3.E — Integrated single-cell physics backend (persistent buffers)
+// =============================================================================
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct StepUniforms {
+    n_vertices: u32,
+    n_elements: u32,
+    half_dt: f32,
+    dt: f32,
+    inv_mass: f32,
+    accel_scale: f32,
+    max_velocity: f32,
+    max_displacement: f32,
+    k_spring: f32,
+    area_modulus: f32,
+    area_force_scale: f32,
+    membrane_damping: f32,
+    gamma: f32,
+    sigma: f32,
+    visc_scale: f32,
+    rand_scale: f32,
+    step_count: u32,
+    seed: u32,
+    _pad0: f32,
+    _pad1: f32,
+}
+
+/// Configuration for the integrated physics backend.
+#[derive(Clone, Debug)]
+pub struct PhysicsBackendConfig {
+    pub dt_sec: f32,
+    pub vertex_mass_pg: f32,
+    pub max_velocity_um_per_sec: f32,
+    pub max_displacement_um: f32,
+    pub temperature_K: f32,
+    pub membrane_damping: f32,
+    pub seed: u32,
+}
+
+impl Default for PhysicsBackendConfig {
+    fn default() -> Self {
+        Self {
+            dt_sec: 1e-6,
+            vertex_mass_pg: 1.0,
+            max_velocity_um_per_sec: 1000.0,
+            max_displacement_um: 0.1,
+            temperature_K: 310.0,
+            membrane_damping: 0.1,
+            seed: 0xDEADBEEF,
+        }
+    }
+}
+
+/// Persistent GPU backend for the integrated physics step.
+///
+/// Owns all persistent buffers (positions, velocities, forces, mesh
+/// topology, WLC baseline) and the compiled compute pipelines. Each call
+/// to `step()` runs one substep on the GPU; `read_state()` downloads
+/// positions and velocities back to the host.
+///
+/// WLC forces are baked into a `wlc_baseline` buffer at construction
+/// because the CPU `WLCSolver::compute_forces` reads from
+/// `network.nodes` (which never updates as the mesh moves) — the contribution
+/// is therefore static across substeps. See `docs/phase_11_3_notes.md`.
+pub struct PhysicsBackend {
+    n_vertices: u32,
+    n_elements: u32,
+    skalak_material: SkalakMaterial,
+    config: PhysicsBackendConfig,
+    step_count: u32,
+    #[allow(dead_code)]
+    pipeline_layout: wgpu::PipelineLayout,
+    #[allow(dead_code)]
+    bgl: wgpu::BindGroupLayout,
+    bg: wgpu::BindGroup,
+    pipe_half_step: wgpu::ComputePipeline,
+    pipe_step_position: wgpu::ComputePipeline,
+    pipe_skalak_per_element: wgpu::ComputePipeline,
+    pipe_skalak_init: wgpu::ComputePipeline,
+    pipe_dpd_add: wgpu::ComputePipeline,
+    pipe_damping_half: wgpu::ComputePipeline,
+    buf_positions: wgpu::Buffer,
+    buf_velocities: wgpu::Buffer,
+    buf_forces: wgpu::Buffer,
+    buf_uniforms: wgpu::Buffer,
+    #[allow(dead_code)]
+    buf_wlc_baseline: wgpu::Buffer,
+    #[allow(dead_code)]
+    buf_elements: wgpu::Buffer,
+    #[allow(dead_code)]
+    buf_csr_offsets: wgpu::Buffer,
+    #[allow(dead_code)]
+    buf_csr_data: wgpu::Buffer,
+    #[allow(dead_code)]
+    buf_elem_forces: wgpu::Buffer,
+    pos_bytes: u64,
+    device: std::sync::Arc<wgpu::Device>,
+    queue: std::sync::Arc<wgpu::Queue>,
+}
+
+impl PhysicsBackend {
+    /// Construct a new persistent backend for a given mesh + spectrin
+    /// network. WLC forces are computed once on the GPU using the existing
+    /// `run_wlc_forces` path and uploaded as a per-mesh-vertex baseline.
+    pub fn new(
+        ctx: &ComputeContext,
+        mesh: &Mesh,
+        spectrin: &SpectrinNetwork,
+        skalak_solver: &SkalakSolver,
+        wlc_params: &WLCParameters,
+        skalak_material: SkalakMaterial,
+        config: PhysicsBackendConfig,
+    ) -> Result<Self> {
+        let n_vertices = mesh.vertices.len() as u32;
+
+        // === WLC baseline: per-mesh-vertex forces from spectrin (static) ===
+        let wlc_backend = WlcBackendData::from_network(spectrin);
+        let wlc_per_node = run_wlc_forces(ctx, spectrin, &wlc_backend, wlc_params)?;
+        let mut wlc_per_vertex = vec![Vec3::ZERO; n_vertices as usize];
+        for (node_idx, node) in spectrin.nodes.iter().enumerate() {
+            let v = node.mesh_vertex_idx as usize;
+            if v < wlc_per_vertex.len() {
+                wlc_per_vertex[v] += wlc_per_node[node_idx];
+            }
+        }
+        let mut wlc_f32 = vec![0f32; n_vertices as usize * 3];
+        for (i, f) in wlc_per_vertex.iter().enumerate() {
+            wlc_f32[i * 3 + 0] = f.x;
+            wlc_f32[i * 3 + 1] = f.y;
+            wlc_f32[i * 3 + 2] = f.z;
+        }
+
+        // === Skalak topology ===
+        let skalak_backend = SkalakBackendData::from_solver(skalak_solver, n_vertices as usize);
+
+        // === Initial positions (from mesh) ===
+        let mut pos_f32 = vec![0f32; n_vertices as usize * 3];
+        for (i, v) in mesh.vertices.iter().enumerate() {
+            pos_f32[i * 3 + 0] = v.position[0];
+            pos_f32[i * 3 + 1] = v.position[1];
+            pos_f32[i * 3 + 2] = v.position[2];
+        }
+
+        // === Persistent buffer allocation ===
+        let pos_bytes = (n_vertices as u64) * 3 * std::mem::size_of::<f32>() as u64;
+        let buf_positions = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("backend positions"),
+            contents: bytemuck::cast_slice(&pos_f32),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        let zero_pos: Vec<f32> = vec![0.0; n_vertices as usize * 3];
+        let buf_velocities = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("backend velocities"),
+            contents: bytemuck::cast_slice(&zero_pos),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        let buf_forces = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("backend forces"),
+            contents: bytemuck::cast_slice(&zero_pos),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        let buf_wlc_baseline = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("backend wlc_baseline"),
+            contents: bytemuck::cast_slice(&wlc_f32),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        let elements_pod: Vec<ElementGpu> = skalak_backend
+            .elements
+            .iter()
+            .map(|e| ElementGpu {
+                v0: e.v0,
+                v1: e.v1,
+                v2: e.v2,
+                ref_area: e.ref_area,
+                ref_len_01: e.ref_len_01,
+                ref_len_02: e.ref_len_02,
+                ref_len_12: e.ref_len_12,
+                _pad: 0.0,
+            })
+            .collect();
+        let buf_elements = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("backend elements"),
+            contents: bytemuck::cast_slice(&elements_pod),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let buf_csr_offsets = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("backend csr_offsets"),
+            contents: bytemuck::cast_slice(&skalak_backend.csr_offsets),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let buf_csr_data = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("backend csr_data"),
+            contents: bytemuck::cast_slice(&skalak_backend.csr_data),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        let n_elements = skalak_backend.n_elements as u32;
+        let elem_forces_bytes = (n_elements as u64) * 9 * std::mem::size_of::<f32>() as u64;
+        let buf_elem_forces = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("backend elem_forces"),
+            size: elem_forces_bytes.max(16),
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
+        let buf_uniforms = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("backend uniforms"),
+            size: std::mem::size_of::<StepUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // === Bind group layout ===
+        let storage = |b: u32, ro: bool| wgpu::BindGroupLayoutEntry {
+            binding: b,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: ro },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let bgl = ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("backend bgl"),
+            entries: &[
+                storage(0, false), // positions
+                storage(1, false), // velocities
+                storage(2, false), // forces
+                storage(3, true),  // wlc_baseline
+                storage(4, true),  // elements
+                storage(5, true),  // csr_offsets
+                storage(6, true),  // csr_data
+                storage(7, false), // elem_forces
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("backend bg"),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: buf_positions.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: buf_velocities.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: buf_forces.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: buf_wlc_baseline.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: buf_elements.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: buf_csr_offsets.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 6, resource: buf_csr_data.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 7, resource: buf_elem_forces.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 8, resource: buf_uniforms.as_entire_binding() },
+            ],
+        });
+
+        let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("backend shader"),
+            source: wgpu::ShaderSource::Wgsl(KERNEL_STEP_WGSL.into()),
+        });
+        let pipeline_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("backend pl"),
+            bind_group_layouts: &[&bgl],
+            push_constant_ranges: &[],
+        });
+        let make_pipe = |entry: &str| {
+            ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: entry,
+                compilation_options: Default::default(),
+            })
+        };
+        let pipe_half_step = make_pipe("verlet_half_step_velocity");
+        let pipe_step_position = make_pipe("verlet_step_position");
+        let pipe_skalak_per_element = make_pipe("skalak_per_element");
+        let pipe_skalak_init = make_pipe("skalak_init_from_baseline");
+        let pipe_dpd_add = make_pipe("dpd_add");
+        let pipe_damping_half = make_pipe("damping_and_half_step");
+
+        Ok(Self {
+            n_vertices,
+            n_elements,
+            skalak_material,
+            config,
+            step_count: 0,
+            pipeline_layout,
+            bgl,
+            bg,
+            pipe_half_step,
+            pipe_step_position,
+            pipe_skalak_per_element,
+            pipe_skalak_init,
+            pipe_dpd_add,
+            pipe_damping_half,
+            buf_positions,
+            buf_velocities,
+            buf_forces,
+            buf_uniforms,
+            buf_wlc_baseline,
+            buf_elements,
+            buf_csr_offsets,
+            buf_csr_data,
+            buf_elem_forces,
+            pos_bytes,
+            device: ctx.device.clone(),
+            queue: ctx.queue.clone(),
+        })
+    }
+
+    /// Run one physics substep on the GPU. Mirrors `PhysicsSolver::step`
+    /// (with PCG-DPD rather than `StdRng`-DPD).
+    pub fn step(&mut self) -> Result<()> {
+        // Compute σ for current temperature.
+        let kbt_J = 1.38e-23_f32 * self.config.temperature_K;
+        let kbt = kbt_J * 1e12_f32;
+        let gamma = 4.5_f32; // matches DPDParameters::default
+        let sigma = (2.0_f32 * gamma * kbt).sqrt();
+
+        let uniforms = StepUniforms {
+            n_vertices: self.n_vertices,
+            n_elements: self.n_elements,
+            half_dt: self.config.dt_sec * 0.5,
+            dt: self.config.dt_sec,
+            inv_mass: 1.0 / self.config.vertex_mass_pg,
+            accel_scale: 10.0,
+            max_velocity: self.config.max_velocity_um_per_sec,
+            max_displacement: self.config.max_displacement_um,
+            k_spring: self.skalak_material.shear_modulus_uN_per_m * 1.732,
+            area_modulus: self.skalak_material.area_modulus_uN_per_m,
+            area_force_scale: 0.001,
+            membrane_damping: self.config.membrane_damping,
+            gamma,
+            sigma,
+            visc_scale: 0.001,
+            rand_scale: 0.0001,
+            step_count: self.step_count,
+            seed: self.config.seed,
+            _pad0: 0.0,
+            _pad1: 0.0,
+        };
+        self.queue
+            .write_buffer(&self.buf_uniforms, 0, bytemuck::bytes_of(&uniforms));
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("backend step encoder"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("backend step pass"),
+                timestamp_writes: None,
+            });
+            pass.set_bind_group(0, &self.bg, &[]);
+            let groups_v = ((self.n_vertices) + 63) / 64;
+            let groups_e = ((self.n_elements) + 63) / 64;
+
+            // 1. Half-step velocity using current forces.
+            pass.set_pipeline(&self.pipe_half_step);
+            pass.dispatch_workgroups(groups_v.max(1), 1, 1);
+
+            // 2. Update positions.
+            pass.set_pipeline(&self.pipe_step_position);
+            pass.dispatch_workgroups(groups_v.max(1), 1, 1);
+
+            // 3. Skalak per-element compute.
+            pass.set_pipeline(&self.pipe_skalak_per_element);
+            pass.dispatch_workgroups(groups_e.max(1), 1, 1);
+
+            // 4. Skalak aggregate + WLC baseline init.
+            pass.set_pipeline(&self.pipe_skalak_init);
+            pass.dispatch_workgroups(groups_v.max(1), 1, 1);
+
+            // 5. DPD add.
+            pass.set_pipeline(&self.pipe_dpd_add);
+            pass.dispatch_workgroups(groups_v.max(1), 1, 1);
+
+            // 6. Membrane damping + final half-step.
+            pass.set_pipeline(&self.pipe_damping_half);
+            pass.dispatch_workgroups(groups_v.max(1), 1, 1);
+        }
+        self.queue.submit(std::iter::once(encoder.finish()));
+        self.step_count += 1;
+        Ok(())
+    }
+
+    /// Download current positions and velocities to the host.
+    pub fn read_state(&self) -> Result<(Vec<Vec3>, Vec<Vec3>)> {
+        let bytes = self.pos_bytes;
+        let pos_staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("backend pos staging"),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let vel_staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("backend vel staging"),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("backend read encoder"),
+        });
+        encoder.copy_buffer_to_buffer(&self.buf_positions, 0, &pos_staging, 0, bytes);
+        encoder.copy_buffer_to_buffer(&self.buf_velocities, 0, &vel_staging, 0, bytes);
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        let pos_slice = pos_staging.slice(..);
+        let (tx_pos, rx_pos) = mpsc::channel();
+        pos_slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx_pos.send(r); });
+        let vel_slice = vel_staging.slice(..);
+        let (tx_vel, rx_vel) = mpsc::channel();
+        vel_slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx_vel.send(r); });
+
+        self.device.poll(wgpu::Maintain::Wait);
+        rx_pos.recv()
+            .context("backend: pos map_async channel closed")?
+            .map_err(|e| anyhow::anyhow!("backend: pos map_async failed: {e:?}"))?;
+        rx_vel.recv()
+            .context("backend: vel map_async channel closed")?
+            .map_err(|e| anyhow::anyhow!("backend: vel map_async failed: {e:?}"))?;
+
+        let mapped_pos = pos_slice.get_mapped_range();
+        let pos_out: &[f32] = bytemuck::cast_slice(&mapped_pos);
+        let mapped_vel = vel_slice.get_mapped_range();
+        let vel_out: &[f32] = bytemuck::cast_slice(&mapped_vel);
+
+        let n = self.n_vertices as usize;
+        let mut positions = Vec::with_capacity(n);
+        let mut velocities = Vec::with_capacity(n);
+        for i in 0..n {
+            positions.push(Vec3::new(
+                pos_out[i * 3 + 0],
+                pos_out[i * 3 + 1],
+                pos_out[i * 3 + 2],
+            ));
+            velocities.push(Vec3::new(
+                vel_out[i * 3 + 0],
+                vel_out[i * 3 + 1],
+                vel_out[i * 3 + 2],
+            ));
+        }
+
+        drop(mapped_pos);
+        drop(mapped_vel);
+        pos_staging.unmap();
+        vel_staging.unmap();
+
+        Ok((positions, velocities))
+    }
+
+    /// Current step count, useful for diagnostics.
+    pub fn step_count(&self) -> u32 {
+        self.step_count
+    }
 }
