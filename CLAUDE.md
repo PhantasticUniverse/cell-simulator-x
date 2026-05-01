@@ -46,6 +46,7 @@ cargo run -- --help                  # Full CLI options
 | `validation` | (feature `validation`) Empirical fits vs Imai 1981, Mulquiney 1999, Rief 1999, Waugh-Evans 1979, Dao 2003 |
 | `world` | Multi-cell `World` + `Cell` + `CellHandle` (Phase 10.5); rayon-parallel per-cell stepping |
 | `compute` | GPU compute scaffolding (Phase 11.0); `ComputeContext` headless wgpu, `vec_add` sentinel kernel |
+| `flow` | (Phase 12.A) Analytic external fluid: `Poiseuille` cylindrical channel + Stokes-form drag for vertex/flow coupling |
 
 ## Current Status
 
@@ -71,6 +72,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 11.3.E: Integrated `PhysicsBackend` ✅ (persistent buffers + 6-dispatch single-pass step; WLC pre-baked as static baseline; CPU/GPU parity 1.9e-15 μm position drift after 10 substeps; see `docs/phase_11_3_notes.md`)
 - Phase 11.4: Render-Compute device sharing ✅ (RenderState exposes `Arc<Device>`/`Arc<Queue>`; `ComputeContext::from_shared` borrows; vertex-shader binding deferred; see `docs/phase_11_4_notes.md`)
 - Phase 11.5: Backend switch + CoupledSolver deprecation ✅ (`WORLD_BACKEND` env var; `Backend` enum; `#[deprecated]` on CoupledSolver/CoupledConfig; wgpu-profiler deferred; see `docs/phase_11_5_notes.md`)
+- Phase 12.A: External fluid — analytic Poiseuille + drag ✅ (`flow::Poiseuille` + `apply_drag_to_external_forces`; CPU integration test shows directional cell drift under flow; `PhysicsBackend` integration + parachute/tank-treading validation deferred to 12.B/C; see `docs/phase_12_notes.md`)
 
 ## Development
 

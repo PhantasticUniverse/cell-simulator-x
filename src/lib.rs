@@ -83,6 +83,7 @@ pub mod compute;
 pub mod config;
 pub mod coupling;
 pub mod export;
+pub mod flow;
 pub mod geometry;
 pub mod physics;
 pub mod render;
@@ -130,6 +131,9 @@ pub use config::Parameters;
 pub use coupling::{CoupledSolver, CoupledConfig, CoupledDiagnostics, TensionComputer, SpectrinModulator};
 // Export module
 pub use export::{CsvExporter, TimeSeriesRecord, export_state_json, save_screenshot};
+pub use flow::{
+    apply_drag_to_external_forces, drag_force_uN, CylindricalChannel, Poiseuille,
+};
 pub use geometry::{Mesh, SpectrinNetwork};
 pub use physics::{PhysicsConfig, PhysicsSolver};
 pub use render::{Camera, ExportAction, HudColors, HudOverlay, HudState, HudTheme, RenderState};
