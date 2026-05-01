@@ -45,6 +45,13 @@ pub struct StorageSimConfig {
     /// (overrides the metabolite pool to the targets at each step). When
     /// `false`, the biochemistry's own kinetics drive the trajectory.
     pub force_atp_dpg_targets: bool,
+    /// Phase 14.B: solve the analytic quasi-steady-state for Na+/K+ at
+    /// the start of each outer step and set the metabolite pool
+    /// accordingly. This bridges the ~hour ion-equilibration timescale
+    /// to the ~second bio-equilibration window, letting the curve match
+    /// Hess 2010's quantitative ion targets without a ~10-minute
+    /// wall-clock per simulation.
+    pub force_ion_qss: bool,
 }
 
 impl Default for StorageSimConfig {
@@ -55,6 +62,7 @@ impl Default for StorageSimConfig {
             seconds_of_bio_per_step: 1.0,
             bio_dt_sec: 1e-3,
             force_atp_dpg_targets: true,
+            force_ion_qss: true,
         }
     }
 }
@@ -146,6 +154,19 @@ impl StorageCurveSimulator {
         self.solver.ion_homeostasis.config.g_na_per_sec = 0.00024 * leak;
         self.solver.ion_homeostasis.config.g_k_per_sec = 0.00015 * leak;
 
+        // === 3.5. Phase 14.B: solve ion QSS ===
+        // Sets Na/K to their quasi-steady-state values for the modified
+        // pump+leak parameters. The biochemistry equilibration that
+        // follows is then a small correction, not a multi-hour drive.
+        if self.config.force_ion_qss {
+            let atp = self.pool.get(self.indices.glycolysis.atp);
+            let qss = solve_ion_qss(pump, leak, atp);
+            self.pool
+                .set(self.indices.ions.na_plus_cytosolic, qss.na_cyt_mM);
+            self.pool
+                .set(self.indices.ions.k_plus_cytosolic, qss.k_cyt_mM);
+        }
+
         // === 4. Run biochemistry equilibration ===
         let n_steps =
             (self.config.seconds_of_bio_per_step / self.config.bio_dt_sec).ceil() as usize;
@@ -160,11 +181,15 @@ impl StorageCurveSimulator {
     }
 
     /// Run the full storage curve from day 0 to `config.end_day`.
+    ///
+    /// Day 0 is sampled the same way as every later day (envelope +
+    /// optional QSS + equilibration) so all samples are produced by the
+    /// same procedure. With `force_ion_qss = true`, day-0 K is the QSS
+    /// value (~145 mM, slightly above the bare-pool default of 140 mM)
+    /// — that's the K value at which pump and leak balance under
+    /// physiological pump/leak parameters.
     pub fn run(&mut self) {
-        // First sample at day 0 with no equilibration so the user sees
-        // the actual physiological initial conditions.
-        self.samples.push(self.sample());
-        let mut day = self.config.days_per_step;
+        let mut day = 0.0;
         // Use a small epsilon to avoid floating-point off-by-one at the
         // end day.
         while day <= self.config.end_day + 1e-9 {
@@ -240,6 +265,108 @@ fn oxidative_stress(s: &StorageLesionModel) -> f64 {
     1.0 + s.config.oxidative_stress_increase_per_day * s.storage_days
 }
 
+// === Ion quasi-steady-state solver (Phase 14.B) ======================
+//
+// At the modified pump/leak parameters of a storage day `d`, the Na+
+// quasi-steady-state satisfies
+//
+//   3 · pump_rate(Na, ATP) = leak_Na(Na)
+//
+// where
+//
+//   pump_rate(Na, ATP) = vmax · pump_eff
+//                       · (Na³ / (Km_Na³ + Na³))
+//                       · (K_ext² / (Km_K² + K_ext²))
+//                       · (ATP / (Km_ATP + ATP))
+//   leak_Na(Na)        = g_na · leak_mult · (Na_ext - Na)
+//
+// Bisection on Na ∈ [0.001, Na_ext) finds the unique root. K+ at QSS
+// follows from `2 · pump_rate = g_k · leak_mult · (K_cyt - K_ext)`.
+
+/// Result of the ion QSS solver.
+#[derive(Debug, Clone, Copy)]
+pub struct IonQss {
+    pub na_cyt_mM: f64,
+    pub k_cyt_mM: f64,
+}
+
+const NA_EXT_MM: f64 = 140.0;
+const K_EXT_MM: f64 = 5.0;
+const KM_NA_MM: f64 = 15.0;
+const KM_K_MM: f64 = 1.5;
+const KM_ATP_MM: f64 = 0.2;
+const VMAX_PUMP: f64 = 0.055;
+const G_NA_BASE: f64 = 0.00024;
+const G_K_BASE: f64 = 0.00015;
+
+fn pump_rate(na_cyt: f64, atp_mM: f64, pump_efficiency: f64) -> f64 {
+    let na3 = na_cyt * na_cyt * na_cyt;
+    let na_term = na3 / (KM_NA_MM.powi(3) + na3);
+    let k_term = K_EXT_MM * K_EXT_MM / (KM_K_MM * KM_K_MM + K_EXT_MM * K_EXT_MM);
+    let atp_term = atp_mM / (KM_ATP_MM + atp_mM);
+    VMAX_PUMP * pump_efficiency * na_term * k_term * atp_term
+}
+
+fn leak_na(na_cyt: f64, leak_multiplier: f64) -> f64 {
+    G_NA_BASE * leak_multiplier * (NA_EXT_MM - na_cyt)
+}
+
+/// Solve the Na+ QSS via bisection, then derive K+ from the same pump
+/// rate. Returns a sane default when ATP or pump efficiency is so low
+/// that no equilibrium exists in (0, 140) — in that limit, leak
+/// dominates and Na approaches Na_ext.
+pub fn solve_ion_qss(
+    pump_efficiency: f64,
+    leak_multiplier: f64,
+    atp_mM: f64,
+) -> IonQss {
+    // Function whose zero we seek: f(Na) = 3·pump - leak_Na.
+    // f(0) is small negative (no pump, leak full inward → leak > 0
+    // means f = -leak < 0). f(Na_ext) is positive (no leak, pump > 0).
+    // Strictly increasing in Na on (0, Na_ext) since pump rises with
+    // Na and leak falls.
+    let f = |na: f64| 3.0 * pump_rate(na, atp_mM, pump_efficiency)
+        - leak_na(na, leak_multiplier);
+
+    let mut lo = 0.001_f64;
+    let mut hi = NA_EXT_MM - 1e-3;
+    let f_lo = f(lo);
+    let f_hi = f(hi);
+    let na_cyt = if f_lo >= 0.0 {
+        // Pump dominates even at Na ≈ 0; QSS is at lo.
+        lo
+    } else if f_hi <= 0.0 {
+        // Leak dominates even near Na_ext; QSS is near the wall.
+        hi
+    } else {
+        for _ in 0..80 {
+            let mid = 0.5 * (lo + hi);
+            let f_mid = f(mid);
+            if f_mid.abs() < 1e-10 {
+                lo = mid;
+                hi = mid;
+                break;
+            }
+            if f_mid > 0.0 { hi = mid; } else { lo = mid; }
+        }
+        0.5 * (lo + hi)
+    };
+
+    // K+ QSS: 2·pump_rate = g_k·leak_mult·(K_cyt - K_ext).
+    let pump = pump_rate(na_cyt, atp_mM, pump_efficiency);
+    let g_k = G_K_BASE * leak_multiplier;
+    let k_cyt = if g_k > 1e-12 {
+        K_EXT_MM + 2.0 * pump / g_k
+    } else {
+        140.0 // unreachable in practice; sentinel
+    };
+
+    IonQss {
+        na_cyt_mM: na_cyt,
+        k_cyt_mM: k_cyt,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,14 +379,17 @@ mod tests {
             seconds_of_bio_per_step: 0.0,
             bio_dt_sec: 1e-3,
             force_atp_dpg_targets: true,
+            force_ion_qss: true,
         });
         sim.run();
         let s = sim.samples().first().expect("at least one sample");
-        // Day 0 should reflect default physiological values.
+        // Day 0 reflects default physiological values modified by ion
+        // QSS — Na ≈ 10 mM and K near 140 mM (QSS slightly above bare
+        // initial K=140).
         assert!((s.atp_mM - 2.0).abs() < 0.05, "ATP day-0: {}", s.atp_mM);
         assert!((s.dpg23_mM - 5.0).abs() < 0.05, "DPG day-0: {}", s.dpg23_mM);
-        assert!((s.na_cyt_mM - 10.0).abs() < 0.5, "Na day-0: {}", s.na_cyt_mM);
-        assert!((s.k_cyt_mM - 140.0).abs() < 1.0, "K day-0: {}", s.k_cyt_mM);
+        assert!((s.na_cyt_mM - 10.0).abs() < 1.0, "Na day-0: {}", s.na_cyt_mM);
+        assert!(s.k_cyt_mM > 138.0, "K day-0: {}", s.k_cyt_mM);
     }
 
     #[test]
@@ -274,6 +404,62 @@ mod tests {
     }
 
     #[test]
+    fn ion_qss_day_0_matches_physiological() {
+        // pump_eff = 1.0, leak_mult = 1.0, ATP = 2.0 mM should land at
+        // Na ~ 10 mM, K ~ 140 mM.
+        let qss = solve_ion_qss(1.0, 1.0, 2.0);
+        assert!(
+            (qss.na_cyt_mM - 10.0).abs() < 2.0,
+            "day-0 QSS Na: {} (target ~10)",
+            qss.na_cyt_mM
+        );
+        assert!(
+            (qss.k_cyt_mM - 140.0).abs() < 5.0,
+            "day-0 QSS K: {} (target ~140)",
+            qss.k_cyt_mM
+        );
+    }
+
+    #[test]
+    fn ion_qss_day_42_in_pathological_range() {
+        // pump_eff = 1 - 0.02*42 = 0.16; leak_mult = 1 + 0.015*42 = 1.63;
+        // ATP at day 42 ≈ 0.5. With those envelope parameters, the QSS
+        // sits at Na ≈ 95 mM — pathologically high (Hess 2010 reports
+        // ~60 mM). The discrepancy reflects the linear envelope
+        // parameters, not a solver bug; closing it is a Phase 14.B
+        // tuning step (re-fit `pump_efficiency_decay_per_day` and
+        // `leak_increase_per_day` to Hess 2010 day-42 / day-14 anchors).
+        let pump_eff = 1.0 - 0.02 * 42.0;
+        let leak_mult = 1.0 + 0.015 * 42.0;
+        let qss = solve_ion_qss(pump_eff, leak_mult, 0.5);
+        println!("day-42 QSS Na={:.1} K={:.1}", qss.na_cyt_mM, qss.k_cyt_mM);
+        // Sanity bounds: pathological Na (>40 mM) and reduced K. Refining
+        // to Hess 2010's exact Na=60 is part of envelope re-fitting in a
+        // follow-on; for now just verify the solver moves Na firmly into
+        // the "membrane-failing" regime.
+        assert!(
+            qss.na_cyt_mM > 40.0,
+            "day-42 QSS Na: {} (>40 mM expected)",
+            qss.na_cyt_mM
+        );
+        assert!(
+            qss.k_cyt_mM < 130.0,
+            "day-42 QSS K: {} (<130 mM expected)",
+            qss.k_cyt_mM
+        );
+    }
+
+    #[test]
+    fn ion_qss_monotone_in_pump_efficiency() {
+        // Lower pump efficiency → higher Na (less efflux).
+        let na_full = solve_ion_qss(1.0, 1.0, 2.0).na_cyt_mM;
+        let na_half = solve_ion_qss(0.5, 1.0, 2.0).na_cyt_mM;
+        let na_low = solve_ion_qss(0.1, 1.0, 2.0).na_cyt_mM;
+        assert!(na_full < na_half);
+        assert!(na_half < na_low);
+    }
+
+    #[test]
     fn sample_lookup_finds_closest_day() {
         let mut sim = StorageCurveSimulator::new(StorageSimConfig {
             end_day: 5.0,
@@ -281,6 +467,7 @@ mod tests {
             seconds_of_bio_per_step: 0.05,
             bio_dt_sec: 1e-3,
             force_atp_dpg_targets: true,
+            force_ion_qss: true,
         });
         sim.run();
         let s = sim.sample_at_day(3.5).expect("found");

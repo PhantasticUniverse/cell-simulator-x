@@ -140,9 +140,27 @@ Pivkin–Karniadakis) currently provides.
 
 ## What's next
 
-- **Phase 14.B**: analytic quasi-steady-state for the ion subsystem;
-  GSH / GSSG retuning against D'Alessandro 2020; tighten unit tests to
-  Hess 2010's quantitative bands.
+- ✅ **Phase 14.B (this commit)**: analytic quasi-steady-state for the
+  ion subsystem. `solve_ion_qss(pump_eff, leak_mult, atp_mM)` does
+  bisection on the Na+ root of `3·pump_rate(Na) = leak_Na(Na)` and
+  derives K+ from the same pump rate. Gated by
+  `force_ion_qss = true` in `StorageSimConfig` (default `true`). With
+  QSS enabled, day-0 lands at the pump+leak equilibrium (Na ≈ 10 mM,
+  K ≈ 145 mM) and day-42 lands at Na ≈ 96 mM / K ≈ 52 mM in seconds of
+  wall-clock — a measurable storage trajectory without minutes of bio
+  equilibration per day.
+- **Phase 14.B' — envelope re-fitting**: Phase 14.B reveals a
+  parameter-identifiability finding. With the simulator's enzyme
+  kinetics fixed (validated in Phase 11.2.E), the linear envelope
+  parameters (`pump_efficiency_decay_per_day = 0.02`,
+  `leak_increase_per_day = 0.015`) drive the QSS to Na ≈ 96 mM at day
+  42 — pathologically beyond Hess 2010's reported ~60 mM. Algebraically,
+  no positive-decay-rate / positive-leak-rate pair can simultaneously
+  match Hess 2010 day-14 (Na ≈ 25, K ≈ 120) AND day-42 (Na ≈ 60, K ≈ 90)
+  with linear envelopes. Either nonlinear envelopes or a different
+  enzyme calibration would close the gap. Documenting this as a
+  parameter-identifiability finding (mirroring the Phase 10 NADPH/PPP
+  refit) is the right move; full fitting is Phase 14.B'.
 - **Phase 14.C**: deformability-decline coupling. The plan called for
   reproducing the 42-day deformability decline curve. With ATP, 2,3-DPG,
   GSH, and oxidative stress all tracked over time, the next step is to
@@ -152,3 +170,46 @@ Pivkin–Karniadakis) currently provides.
 - **Phase 14.D**: sweep the storage parameter space — supercooled
   vs. standard storage, additive solutions (AS-3, SAGM, PAGGSM),
   comparator runs.
+
+## Phase 14.B addendum — what landed
+
+### `solve_ion_qss(pump_efficiency, leak_multiplier, atp_mM) -> IonQss`
+
+Bisection-based root finder for the Na+ ion quasi-steady-state under
+modified pump+leak parameters. K+ derives from the same pump rate. Three
+unit tests:
+
+- `ion_qss_day_0_matches_physiological` — at envelope = (1, 1, 2 mM
+  ATP), QSS lands at Na ≈ 10 mM, K ≈ 140 mM (within 5 mM).
+- `ion_qss_day_42_in_pathological_range` — at envelope = (0.16, 1.63,
+  0.5 mM ATP), QSS lands at Na > 40 mM, K < 130 mM. Quantitative match
+  to Hess 2010 (Na ≈ 60, K ≈ 90) is gated on Phase 14.B' envelope re-fit.
+- `ion_qss_monotone_in_pump_efficiency` — Na strictly increases as pump
+  efficiency drops (sanity check on the bisection).
+
+### Storage simulator integration
+
+`StorageCurveSimulator::step_to_day()` now (when `force_ion_qss = true`)
+calls `solve_ion_qss` and writes the result to the metabolite pool
+before running the bio equilibration window. The bio equilibration is
+then a small correction (other species: NADPH / GSH / lactate)
+rather than a multi-hour drive on the ion system.
+
+`run()` no longer takes a special "initial physiological" day-0 sample
+— day 0 goes through the same `step_to_day(0.0)` path so all samples
+come from the same procedure. Day-0 K is now ~145 mM (the QSS value)
+instead of the bare-pool 140 mM.
+
+### Default behaviour change
+
+`StorageSimConfig::default()` enables `force_ion_qss = true`. Existing
+callers that want the legacy slow-equilibration behaviour can set
+`force_ion_qss: false` explicitly (the
+`ion_gradients_long_equilibration` `#[ignore]` test exercises this
+path).
+
+### Test counts after 14.B
+
+- 203 lib tests (was 200; +3 from `ion_qss_*`).
+- 148 integration tests (unchanged from 14.A; existing tests still
+  pass with the QSS-on-by-default config).
