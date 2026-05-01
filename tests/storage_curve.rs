@@ -25,6 +25,7 @@ fn run_full_curve() -> StorageCurveSimulator {
         bio_dt_sec: 1e-3,
         force_atp_dpg_targets: true,
         force_ion_qss: true,
+        use_exponential_pump_envelope: true,
     };
     let mut sim = StorageCurveSimulator::new(config);
     sim.run();
@@ -82,6 +83,52 @@ fn dpg_depletes_per_zimrin_2009() {
 }
 
 #[test]
+fn ion_gradients_match_hess_2010_quantitatively() {
+    // Phase 14.B'' headline: with exponential pump envelope (default),
+    // the simulator quantitatively matches Hess 2010 / Luten 2008 ion
+    // targets at days 0, 14, AND 42 simultaneously.
+    let sim = run_full_curve();
+    let d0 = sim.sample_at_day(0.0).unwrap();
+    let d14 = sim.sample_at_day(14.0).unwrap();
+    let d42 = sim.sample_at_day(42.0).unwrap();
+    println!(
+        "Phase 14.B'' Hess 2010 match:\n  d0  Na={:.1} K={:.1}\n  d14 Na={:.1} K={:.1}\n  d42 Na={:.1} K={:.1}",
+        d0.na_cyt_mM, d0.k_cyt_mM,
+        d14.na_cyt_mM, d14.k_cyt_mM,
+        d42.na_cyt_mM, d42.k_cyt_mM,
+    );
+
+    // Day 0: Na ≈ 10 mM, K ≈ 140 mM (with QSS: K is 143–145 mM, ~5 mM
+    // above bare physiological — accept as QSS quirk).
+    assert!((d0.na_cyt_mM - 10.0).abs() < 1.0, "d0 Na: {}", d0.na_cyt_mM);
+    assert!(d0.k_cyt_mM > 138.0 && d0.k_cyt_mM < 150.0, "d0 K: {}", d0.k_cyt_mM);
+
+    // Day 14: Na ≈ 25, K ≈ 120 (Hess 2010).
+    assert!(
+        (d14.na_cyt_mM - 25.0).abs() < 5.0,
+        "d14 Na: {} (Hess 2010 ≈ 25)",
+        d14.na_cyt_mM
+    );
+    assert!(
+        (d14.k_cyt_mM - 120.0).abs() < 10.0,
+        "d14 K: {} (Hess 2010 ≈ 120)",
+        d14.k_cyt_mM
+    );
+
+    // Day 42: Na ≈ 60, K ≈ 90 (Hess 2010).
+    assert!(
+        (d42.na_cyt_mM - 60.0).abs() < 5.0,
+        "d42 Na: {} (Hess 2010 ≈ 60)",
+        d42.na_cyt_mM
+    );
+    assert!(
+        (d42.k_cyt_mM - 90.0).abs() < 10.0,
+        "d42 K: {} (Hess 2010 ≈ 90)",
+        d42.k_cyt_mM
+    );
+}
+
+#[test]
 fn ion_gradients_trend_correctly() {
     let sim = run_full_curve();
     let d0 = sim.sample_at_day(0.0).unwrap();
@@ -127,6 +174,8 @@ fn ion_gradients_long_equilibration() {
         force_atp_dpg_targets: true,
         // Disable QSS — this test exercises the legacy slow-equilibration path.
         force_ion_qss: false,
+        // Linear envelope to keep this slow-path test backwards-compatible.
+        use_exponential_pump_envelope: false,
     });
     sim.run();
     let d14 = sim.sample_at_day(14.0).unwrap();

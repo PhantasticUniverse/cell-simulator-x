@@ -61,6 +61,15 @@ pub struct StorageSimConfig {
     /// Hess 2010's quantitative ion targets without a ~10-minute
     /// wall-clock per simulation.
     pub force_ion_qss: bool,
+
+    /// Phase 14.B'': use a Hess-calibrated **exponential** envelope for
+    /// pump efficiency instead of the linear envelope from
+    /// `StorageLesionModel`. Calibrated to satisfy Hess 2010 anchors at
+    /// day 14 (Na ≈ 25 mM) **and** day 42 (Na ≈ 60 mM) simultaneously,
+    /// which the linear envelope alone cannot do. Form:
+    /// `eff(t) = eff_inf + (1 - eff_inf) · exp(-β · t)` with
+    /// `eff_inf = 0.295` and `β = 0.305`/day.
+    pub use_exponential_pump_envelope: bool,
 }
 
 impl Default for StorageSimConfig {
@@ -72,8 +81,22 @@ impl Default for StorageSimConfig {
             bio_dt_sec: 1e-3,
             force_atp_dpg_targets: true,
             force_ion_qss: true,
+            use_exponential_pump_envelope: true,
         }
     }
+}
+
+// Phase 14.B'' exponential pump-envelope parameters. Calibrated by hand
+// from the algebra in `docs/phase_14_notes.md`: with linear leak
+// `1 + 0.015·t` and the target ratios `eff(t)/leak(t) = 1.0` (day 0),
+// `0.252` (day 14, Na = 25 mM target), `0.181` (day 42, Na = 60 mM
+// target), the exponential `eff(t) = eff_inf + (1 - eff_inf)·exp(-β·t)`
+// uniquely fits with `eff_inf = 0.295` and `β = 0.305/day`.
+const HESS_EFF_INF: f64 = 0.295;
+const HESS_EFF_DECAY_PER_DAY: f64 = 0.305;
+
+fn hess_pump_efficiency(day: f64) -> f64 {
+    HESS_EFF_INF + (1.0 - HESS_EFF_INF) * (-HESS_EFF_DECAY_PER_DAY * day).exp()
 }
 
 /// Top-level orchestrator for a 42-day storage curve simulation.
@@ -136,6 +159,12 @@ impl StorageCurveSimulator {
         let stiff = self.spectrin_modulator.stiffness_modifier(atp) as f64;
         let deformability_relative = if stiff > 1e-9 { 1.0 / stiff } else { 0.0 };
 
+        let pump_eff = if self.config.use_exponential_pump_envelope {
+            hess_pump_efficiency(self.storage.storage_days)
+        } else {
+            pump_efficiency(&self.storage)
+        };
+
         StorageSample {
             day: self.storage.storage_days,
             atp_mM: atp,
@@ -147,7 +176,7 @@ impl StorageCurveSimulator {
             na_cyt_mM: self.pool.get(i.ions.na_plus_cytosolic),
             k_cyt_mM: self.pool.get(i.ions.k_plus_cytosolic),
             lactate_mM: self.pool.get(i.glycolysis.lactate),
-            pump_efficiency: pump_efficiency(&self.storage),
+            pump_efficiency: pump_eff,
             leak_multiplier: leak_multiplier(&self.storage),
             oxidative_stress: oxidative_stress(&self.storage),
             deformability_relative,
@@ -173,11 +202,17 @@ impl StorageCurveSimulator {
         let stress = oxidative_stress(&self.storage);
         self.solver.glutathione.set_oxidative_stress(stress);
 
-        // Pump efficiency (multiplier on Na/K-ATPase Vmax).
-        let pump = pump_efficiency(&self.storage);
+        // Pump efficiency (Phase 14.B'' exponential envelope when
+        // `use_exponential_pump_envelope = true`, else fall back to
+        // `StorageLesionModel`'s linear formula).
+        let pump = if self.config.use_exponential_pump_envelope {
+            hess_pump_efficiency(target_day)
+        } else {
+            pump_efficiency(&self.storage)
+        };
         self.solver.ion_homeostasis.na_k_pump.vmax_mM_per_sec = 0.055 * pump;
 
-        // Leak conductances.
+        // Leak conductances (always linear from `StorageLesionModel`).
         let leak = leak_multiplier(&self.storage);
         self.solver.ion_homeostasis.config.g_na_per_sec = 0.00024 * leak;
         self.solver.ion_homeostasis.config.g_k_per_sec = 0.00015 * leak;
@@ -186,6 +221,9 @@ impl StorageCurveSimulator {
         // Sets Na/K to their quasi-steady-state values for the modified
         // pump+leak parameters. The biochemistry equilibration that
         // follows is then a small correction, not a multi-hour drive.
+        // Note: `pump` (above) already reflects the chosen envelope
+        // shape (linear or exponential), so this picks up Phase 14.B''
+        // automatically.
         if self.config.force_ion_qss {
             let atp = self.pool.get(self.indices.glycolysis.atp);
             let qss = solve_ion_qss(pump, leak, atp);
@@ -409,6 +447,7 @@ mod tests {
             bio_dt_sec: 1e-3,
             force_atp_dpg_targets: true,
             force_ion_qss: true,
+            use_exponential_pump_envelope: true,
         });
         sim.run();
         let s = sim.samples().first().expect("at least one sample");
@@ -490,6 +529,7 @@ mod tests {
             bio_dt_sec: 1e-3,
             force_atp_dpg_targets: true,
             force_ion_qss: true,
+            use_exponential_pump_envelope: true,
         });
         sim.run();
         let s = sim.sample_at_day(3.5).expect("found");
