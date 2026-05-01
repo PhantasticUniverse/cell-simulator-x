@@ -34,7 +34,9 @@ use anyhow::{Context as _, Result};
 pub mod biochem;
 pub mod diagnostics;
 
-pub use biochem::{run_glycolysis_batch, GlycolysisBatchConfig};
+pub use biochem::{
+    run_full_biochem_batch, run_glycolysis_batch, FullBiochemBatchConfig, GlycolysisBatchConfig,
+};
 pub use diagnostics::{run_diagnose_gpu, vec_add_gpu};
 
 /// Headless wgpu compute context.

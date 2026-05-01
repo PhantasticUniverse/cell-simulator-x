@@ -64,6 +64,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 11.0: GPU Compute Scaffolding ✅ (ComputeContext headless wgpu, vec_add sentinel kernel, --diagnose-gpu, CPU=GPU bitwise on Apple M4 Max; dependency upgrade deferred per `docs/phase_11_0_notes.md`)
 - Phase 11.2.A: Glycolysis on GPU ✅ (11 enzymes + RK4 in WGSL; 0.0000% rel-err per species after 1s simulation vs CPU baseline; see `docs/phase_11_2_a_notes.md`)
 - Phase 11.2.B: 2,3-BPG Shunt on GPU ✅ (BPGM + BPGP added → full 18-species `MetabolismSolver` parity; 0.0009% worst-fit rel-err on 2,3-BPG)
+- Phase 11.2.C: PPP + Glutathione + Piezo1 + Ions on GPU ✅ (full 38-species kernel: 22 rate functions; 0.0023% worst-fit rel-err on Na⁺ after 1s; see `docs/phase_11_2_c_notes.md`)
 
 ## Development
 
