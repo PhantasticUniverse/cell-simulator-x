@@ -4,7 +4,8 @@
 // and lactate export to a wgpu compute kernel. Each thread handles one
 // cell; one dispatch advances every cell by `n_steps` RK4 ms-steps.
 //
-// State layout: cell-major, 17 f32 per cell.
+// State layout: cell-major, 18 f32 per cell (indices 0–17 of the
+// `FullyIntegratedIndices` layout).
 //   0  Glucose
 //   1  Glucose-6-phosphate (G6P)
 //   2  Fructose-6-phosphate (F6P)
@@ -22,6 +23,7 @@
 //   14 NAD+
 //   15 NADH
 //   16 Pi
+//   17 2,3-bisphosphoglycerate (2,3-BPG)
 //
 // Indices match Rust `MetaboliteIndices` from src/biochemistry/glycolysis.rs.
 //
@@ -29,7 +31,7 @@
 // f32 (24-bit mantissa, ~7 sig figs) is adequate. The CPU side keeps f64
 // and the host wrapper does f64↔f32 conversion at upload/download.
 
-const N_SPECIES: u32 = 17u;
+const N_SPECIES: u32 = 18u;
 
 // Species indices.
 const GLUCOSE: u32 = 0u;
@@ -49,6 +51,7 @@ const ADP:     u32 = 13u;
 const NAD:     u32 = 14u;
 const NADH:    u32 = 15u;
 const PI:      u32 = 16u;
+const BPG23:   u32 = 17u;
 
 // Uniforms — world-level constants and dispatch parameters.
 struct U {
@@ -186,10 +189,26 @@ fn rate_ldh(pyr: f32, nadh: f32, lac: f32, nad: f32) -> f32 {
     );
 }
 
+// 2,3-BPG shunt (Rapoport-Luebering).
+//
+// BPGM: 1,3-BPG → 2,3-BPG (with product inhibition by 2,3-BPG).
+fn rate_bpgm(bpg13: f32, bpg23: f32) -> f32 {
+    let base = michaelis_menten(0.045, 0.004, bpg13);
+    return base / (1.0 + bpg23 / 2.0);
+}
+
+// BPGP: 2,3-BPG → 3-PG + Pi (with competitive Pi inhibition + 3-PG
+// product inhibition).
+fn rate_bpgp(bpg23: f32, pi: f32, pg3: f32) -> f32 {
+    let km_apparent = 2.0 * (1.0 + pi / 0.5);
+    let base = michaelis_menten(0.0015, km_apparent, bpg23);
+    return base / (1.0 + pg3 / 1.0);
+}
+
 // === Derivatives ====================================================
 
-// Compute dy/dt for the 17-species glycolytic system.
-fn derivatives(y: ptr<function, array<f32, 17>>, dydt: ptr<function, array<f32, 17>>) {
+// Compute dy/dt for the 18-species glycolytic system (incl. 2,3-BPG shunt).
+fn derivatives(y: ptr<function, array<f32, 18>>, dydt: ptr<function, array<f32, 18>>) {
     // Zero output.
     for (var i = 0u; i < N_SPECIES; i = i + 1u) {
         (*dydt)[i] = 0.0;
@@ -214,6 +233,7 @@ fn derivatives(y: ptr<function, array<f32, 17>>, dydt: ptr<function, array<f32, 
     let nad     = (*y)[NAD];
     let nadh    = (*y)[NADH];
     let pi      = (*y)[PI];
+    let bpg23   = (*y)[BPG23];
 
     // === Enzymes ===================================================
 
@@ -286,6 +306,17 @@ fn derivatives(y: ptr<function, array<f32, 17>>, dydt: ptr<function, array<f32, 
     (*dydt)[LAC]  = (*dydt)[LAC]  + v_ldh;
     (*dydt)[NAD]  = (*dydt)[NAD]  + v_ldh;
 
+    // BPGM: 1,3-BPG → 2,3-BPG (Rapoport-Luebering shunt entry).
+    let v_bpgm = rate_bpgm(bpg, bpg23);
+    (*dydt)[BPG13] = (*dydt)[BPG13] - v_bpgm;
+    (*dydt)[BPG23] = (*dydt)[BPG23] + v_bpgm;
+
+    // BPGP: 2,3-BPG → 3-PG + Pi (shunt exit, slow).
+    let v_bpgp = rate_bpgp(bpg23, pi, pg3);
+    (*dydt)[BPG23] = (*dydt)[BPG23] - v_bpgp;
+    (*dydt)[PG3]   = (*dydt)[PG3]   + v_bpgp;
+    (*dydt)[PI]    = (*dydt)[PI]    + v_bpgp;
+
     // === World-level dynamics ======================================
 
     // External ATP consumption (membrane pumps, etc.).
@@ -322,18 +353,18 @@ fn rk4_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let base = cell * N_SPECIES;
 
     // Read state into local registers.
-    var y: array<f32, 17>;
+    var y: array<f32, 18>;
     for (var i = 0u; i < N_SPECIES; i = i + 1u) {
         y[i] = state[base + i];
     }
 
     // Inner ms-step loop. Each iteration advances by u.dt_sec.
     for (var step = 0u; step < u.n_steps; step = step + 1u) {
-        var k1: array<f32, 17>;
-        var k2: array<f32, 17>;
-        var k3: array<f32, 17>;
-        var k4: array<f32, 17>;
-        var y_temp: array<f32, 17>;
+        var k1: array<f32, 18>;
+        var k2: array<f32, 18>;
+        var k3: array<f32, 18>;
+        var k4: array<f32, 18>;
+        var y_temp: array<f32, 18>;
 
         // k1 = f(y)
         derivatives(&y, &k1);

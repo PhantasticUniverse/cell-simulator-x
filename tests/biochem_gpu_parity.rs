@@ -1,8 +1,12 @@
-//! Phase 11.2.A parity test: GPU glycolysis vs CPU glycolysis after 1 s.
+//! Phase 11.2.A/B parity test: GPU vs CPU glycolysis + 2,3-BPG shunt
+//! after 1 s of simulated time.
 //!
-//! Builds an identical pool, runs glycolysis-only on both backends for 1
-//! second of simulated time, and asserts per-species relative error < 1%
-//! (or absolute < 1e-3 mM for sub-millimolar species).
+//! Builds an identical pool, runs the 18-species kernel on both backends
+//! for 1000 RK4 ms-steps, and asserts per-species relative error < 1%
+//! (or absolute < 1e-3 mM for sub-millimolar species). The CPU reference
+//! mirrors the GPU `derivatives` function exactly so the comparison is
+//! apples-to-apples (glycolysis + shunt + GLUT1 + MCT1 + ATP demand,
+//! nothing more, nothing less).
 //!
 //! Skipped if no GPU adapter is available.
 
@@ -10,16 +14,21 @@ use cell_simulator_x::biochemistry::{
     GlycolysisSolver, MetaboliteIndices, MetabolitePool, RapoportLueberingSolver,
 };
 use cell_simulator_x::compute::{run_glycolysis_batch, ComputeContext, GlycolysisBatchConfig};
+use cell_simulator_x::ExtendedMetaboliteIndices;
 
 const DURATION_SEC: f64 = 1.0;
 const DT_SEC: f64 = 0.001;
 
-/// CPU reference: glycolysis-only RK4 (matches the GPU kernel scope).
-/// We don't use `MetabolismSolver` directly because it bundles the
-/// 2,3-BPG shunt; the GPU 11.2.A kernel deliberately omits the shunt.
+/// CPU reference: glycolysis + 2,3-BPG shunt RK4. Matches the GPU
+/// kernel scope after Phase 11.2.B (shunt added).
 #[allow(non_snake_case)]
 fn run_cpu_glycolysis_only(pool: &mut MetabolitePool, duration_sec: f64) {
+    let extended = ExtendedMetaboliteIndices::default();
     let glyco = GlycolysisSolver::new();
+    let shunt = RapoportLueberingSolver::new(
+        &extended.glycolysis,
+        extended.bisphosphoglycerate_2_3,
+    );
     // Match GPU defaults.
     let external_glucose_mM = 5.0;
     let atp_consumption_mM_per_sec = 0.001;
@@ -47,6 +56,7 @@ fn run_cpu_glycolysis_only(pool: &mut MetabolitePool, duration_sec: f64) {
                 concentrations_mM: state.to_vec(),
             };
             glyco.compute_derivatives(&temp, dydt);
+            shunt.compute_derivatives(&temp, dydt);
             // External ATP consumption.
             dydt[indices.atp] -= atp_consumption_mM_per_sec;
             dydt[indices.adp] += atp_consumption_mM_per_sec;
@@ -79,13 +89,14 @@ fn run_cpu_glycolysis_only(pool: &mut MetabolitePool, duration_sec: f64) {
             }
         }
     }
-    // Suppress "unused" warning for shunt — confirms its absence is
-    // intentional in this 11.2.A scope test.
-    let _ = RapoportLueberingSolver::new(&MetaboliteIndices::default(), 17);
 }
 
 fn build_pool() -> MetabolitePool {
     MetabolitePool::default_physiological()
+}
+
+fn extended() -> ExtendedMetaboliteIndices {
+    ExtendedMetaboliteIndices::default()
 }
 
 fn species_label(idx: usize, indices: &MetaboliteIndices) -> &'static str {
@@ -106,6 +117,7 @@ fn species_label(idx: usize, indices: &MetaboliteIndices) -> &'static str {
     else if idx == indices.nad { "NAD+" }
     else if idx == indices.nadh { "NADH" }
     else if idx == indices.pi { "Pi" }
+    else if idx == 17 { "2,3-BPG" }
     else { "(other)" }
 }
 
@@ -142,6 +154,7 @@ fn glycolysis_cpu_gpu_parity_one_second() {
     gpu_pool = pools.into_iter().next().unwrap();
 
     // === Compare ===
+    let ext = extended();
     let species: Vec<usize> = vec![
         indices.glucose,
         indices.glucose_6_phosphate,
@@ -160,6 +173,7 @@ fn glycolysis_cpu_gpu_parity_one_second() {
         indices.nad,
         indices.nadh,
         indices.pi,
+        ext.bisphosphoglycerate_2_3,
     ];
 
     let mut max_rel_err = 0.0f64;

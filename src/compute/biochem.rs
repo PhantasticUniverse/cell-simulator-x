@@ -28,11 +28,11 @@ use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::biochemistry::{MetabolitePool, MetaboliteIndices};
+use crate::biochemistry::{ExtendedMetaboliteIndices, MetabolitePool};
 
 use super::ComputeContext;
 
-const N_SPECIES: usize = 17;
+const N_SPECIES: usize = 18;
 
 /// Source of the glycolysis kernel.
 const KERNEL_WGSL: &str = include_str!("../../shaders/compute/biochem_glycolysis.wgsl");
@@ -112,30 +112,32 @@ pub fn run_glycolysis_batch(
         return Ok(());
     }
 
-    let indices = MetaboliteIndices::default();
+    let indices = ExtendedMetaboliteIndices::default();
+    let g = &indices.glycolysis;
 
-    // === Upload: flatten N pools × 17 f64 into one Vec<f32> ============
+    // === Upload: flatten N pools × 18 f64 into one Vec<f32> ============
     let mut state_f32 = vec![0f32; n_cells * N_SPECIES];
     for (cell_idx, pool) in pools.iter().enumerate() {
         let base = cell_idx * N_SPECIES;
         let s = &mut state_f32[base..base + N_SPECIES];
-        s[0]  = pool.get(indices.glucose) as f32;
-        s[1]  = pool.get(indices.glucose_6_phosphate) as f32;
-        s[2]  = pool.get(indices.fructose_6_phosphate) as f32;
-        s[3]  = pool.get(indices.fructose_1_6_bisphosphate) as f32;
-        s[4]  = pool.get(indices.dihydroxyacetone_phosphate) as f32;
-        s[5]  = pool.get(indices.glyceraldehyde_3_phosphate) as f32;
-        s[6]  = pool.get(indices.bisphosphoglycerate_1_3) as f32;
-        s[7]  = pool.get(indices.phosphoglycerate_3) as f32;
-        s[8]  = pool.get(indices.phosphoglycerate_2) as f32;
-        s[9]  = pool.get(indices.phosphoenolpyruvate) as f32;
-        s[10] = pool.get(indices.pyruvate) as f32;
-        s[11] = pool.get(indices.lactate) as f32;
-        s[12] = pool.get(indices.atp) as f32;
-        s[13] = pool.get(indices.adp) as f32;
-        s[14] = pool.get(indices.nad) as f32;
-        s[15] = pool.get(indices.nadh) as f32;
-        s[16] = pool.get(indices.pi) as f32;
+        s[0]  = pool.get(g.glucose) as f32;
+        s[1]  = pool.get(g.glucose_6_phosphate) as f32;
+        s[2]  = pool.get(g.fructose_6_phosphate) as f32;
+        s[3]  = pool.get(g.fructose_1_6_bisphosphate) as f32;
+        s[4]  = pool.get(g.dihydroxyacetone_phosphate) as f32;
+        s[5]  = pool.get(g.glyceraldehyde_3_phosphate) as f32;
+        s[6]  = pool.get(g.bisphosphoglycerate_1_3) as f32;
+        s[7]  = pool.get(g.phosphoglycerate_3) as f32;
+        s[8]  = pool.get(g.phosphoglycerate_2) as f32;
+        s[9]  = pool.get(g.phosphoenolpyruvate) as f32;
+        s[10] = pool.get(g.pyruvate) as f32;
+        s[11] = pool.get(g.lactate) as f32;
+        s[12] = pool.get(g.atp) as f32;
+        s[13] = pool.get(g.adp) as f32;
+        s[14] = pool.get(g.nad) as f32;
+        s[15] = pool.get(g.nadh) as f32;
+        s[16] = pool.get(g.pi) as f32;
+        s[17] = pool.get(indices.bisphosphoglycerate_2_3) as f32;
     }
 
     let bytes = (state_f32.len() * std::mem::size_of::<f32>()) as u64;
@@ -266,23 +268,24 @@ pub fn run_glycolysis_batch(
     for (cell_idx, pool) in pools.iter_mut().enumerate() {
         let base = cell_idx * N_SPECIES;
         let s = &result_f32[base..base + N_SPECIES];
-        pool.set(indices.glucose, s[0] as f64);
-        pool.set(indices.glucose_6_phosphate, s[1] as f64);
-        pool.set(indices.fructose_6_phosphate, s[2] as f64);
-        pool.set(indices.fructose_1_6_bisphosphate, s[3] as f64);
-        pool.set(indices.dihydroxyacetone_phosphate, s[4] as f64);
-        pool.set(indices.glyceraldehyde_3_phosphate, s[5] as f64);
-        pool.set(indices.bisphosphoglycerate_1_3, s[6] as f64);
-        pool.set(indices.phosphoglycerate_3, s[7] as f64);
-        pool.set(indices.phosphoglycerate_2, s[8] as f64);
-        pool.set(indices.phosphoenolpyruvate, s[9] as f64);
-        pool.set(indices.pyruvate, s[10] as f64);
-        pool.set(indices.lactate, s[11] as f64);
-        pool.set(indices.atp, s[12] as f64);
-        pool.set(indices.adp, s[13] as f64);
-        pool.set(indices.nad, s[14] as f64);
-        pool.set(indices.nadh, s[15] as f64);
-        pool.set(indices.pi, s[16] as f64);
+        pool.set(g.glucose, s[0] as f64);
+        pool.set(g.glucose_6_phosphate, s[1] as f64);
+        pool.set(g.fructose_6_phosphate, s[2] as f64);
+        pool.set(g.fructose_1_6_bisphosphate, s[3] as f64);
+        pool.set(g.dihydroxyacetone_phosphate, s[4] as f64);
+        pool.set(g.glyceraldehyde_3_phosphate, s[5] as f64);
+        pool.set(g.bisphosphoglycerate_1_3, s[6] as f64);
+        pool.set(g.phosphoglycerate_3, s[7] as f64);
+        pool.set(g.phosphoglycerate_2, s[8] as f64);
+        pool.set(g.phosphoenolpyruvate, s[9] as f64);
+        pool.set(g.pyruvate, s[10] as f64);
+        pool.set(g.lactate, s[11] as f64);
+        pool.set(g.atp, s[12] as f64);
+        pool.set(g.adp, s[13] as f64);
+        pool.set(g.nad, s[14] as f64);
+        pool.set(g.nadh, s[15] as f64);
+        pool.set(g.pi, s[16] as f64);
+        pool.set(indices.bisphosphoglycerate_2_3, s[17] as f64);
     }
 
     drop(mapped);

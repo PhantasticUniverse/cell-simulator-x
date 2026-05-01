@@ -1,4 +1,12 @@
-# Phase 11.2.A Notes — Glycolysis on GPU
+# Phase 11.2.A/B Notes — Glycolysis (+ 2,3-BPG Shunt) on GPU
+
+> **11.2.B addendum** (same session): The 2,3-BPG shunt (BPGM + BPGP)
+> was added on top of the 11.2.A glycolytic backbone, bringing the GPU
+> kernel to 18 species — the full `MetabolismSolver` scope. Worst-fit
+> after 1 s simulation: 2,3-BPG itself at **0.0009% relative error**,
+> still well below the 1% acceptance threshold. The kernel extension
+> pattern is now proven; remaining pathways (PPP/glutathione/ions/Hb)
+> are mechanical extensions on the same template.
 
 Date: 2026-05-01
 
