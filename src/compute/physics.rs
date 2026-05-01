@@ -12,12 +12,13 @@ use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 use crate::geometry::{Mesh, SpectrinNetwork};
-use crate::physics::{SkalakMaterial, SkalakSolver, WLCParameters};
+use crate::physics::{DPDParameters, SkalakMaterial, SkalakSolver, WLCParameters};
 
 use super::ComputeContext;
 
 const KERNEL_WGSL: &str = include_str!("../../shaders/compute/skalak.wgsl");
 const KERNEL_WLC_WGSL: &str = include_str!("../../shaders/compute/wlc.wgsl");
+const KERNEL_DPD_WGSL: &str = include_str!("../../shaders/compute/dpd.wgsl");
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -681,6 +682,200 @@ pub fn run_wlc_forces(
 
     let mut out = Vec::with_capacity(n_nodes);
     for i in 0..n_nodes {
+        out.push(Vec3::new(
+            result_f32[i * 3 + 0],
+            result_f32[i * 3 + 1],
+            result_f32[i * 3 + 2],
+        ));
+    }
+
+    drop(mapped);
+    buf_staging.unmap();
+
+    Ok(out)
+}
+
+// =============================================================================
+// Phase 11.3.C — DPD membrane forces (stateless PCG hash RNG)
+// =============================================================================
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct DpdUniforms {
+    n_vertices: u32,
+    step_count: u32,
+    seed: u32,
+    gamma: f32,
+    sigma: f32,
+    visc_scale: f32,
+    rand_scale: f32,
+    _pad0: f32,
+}
+
+/// Run the per-vertex DPD membrane force kernel on the GPU. Uses the same
+/// stateless PCG hash + Box-Muller as `DPDSolver::compute_membrane_forces_pcg`
+/// on the CPU side, so given identical (seed, step_count) the output is
+/// bit-identical between the two backends.
+pub fn run_dpd_membrane_forces(
+    ctx: &ComputeContext,
+    velocities: &[Vec3],
+    params: &DPDParameters,
+    temperature_K: f32,
+    step_count: u32,
+    seed: u32,
+) -> Result<Vec<Vec3>> {
+    let n = velocities.len();
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+
+    // Compute σ for the given temperature (mirrors the CPU code).
+    let kbt_J = 1.38e-23_f32 * temperature_K;
+    let kbt = kbt_J * 1e12_f32;
+    let sigma = (2.0_f32 * params.dissipation_gamma * kbt).sqrt();
+
+    // Upload velocities (SoA scalar).
+    let mut vel_f32 = vec![0f32; n * 3];
+    for (i, v) in velocities.iter().enumerate() {
+        vel_f32[i * 3 + 0] = v.x;
+        vel_f32[i * 3 + 1] = v.y;
+        vel_f32[i * 3 + 2] = v.z;
+    }
+    let buf_vel = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("dpd velocities"),
+        contents: bytemuck::cast_slice(&vel_f32),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+
+    let forces_bytes = (n * 3 * std::mem::size_of::<f32>()) as u64;
+    let buf_forces = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("dpd forces"),
+        size: forces_bytes,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let uniforms = DpdUniforms {
+        n_vertices: n as u32,
+        step_count,
+        seed,
+        gamma: params.dissipation_gamma,
+        sigma,
+        visc_scale: 0.001,
+        rand_scale: 0.0001,
+        _pad0: 0.0,
+    };
+    let buf_u = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("dpd uniforms"),
+        contents: bytemuck::bytes_of(&uniforms),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let buf_staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("dpd staging"),
+        size: forces_bytes,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let bgl = ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("dpd bgl"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
+    });
+
+    let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("dpd bg"),
+        layout: &bgl,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: buf_vel.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: buf_forces.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: buf_u.as_entire_binding() },
+        ],
+    });
+
+    let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("dpd shader"),
+        source: wgpu::ShaderSource::Wgsl(KERNEL_DPD_WGSL.into()),
+    });
+
+    let pipeline_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("dpd pl"),
+        bind_group_layouts: &[&bgl],
+        push_constant_ranges: &[],
+    });
+
+    let pipeline = ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("dpd pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: "dpd_membrane",
+        compilation_options: Default::default(),
+    });
+
+    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("dpd encoder"),
+    });
+
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("dpd pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bg, &[]);
+        let groups = ((n as u32) + 63) / 64;
+        pass.dispatch_workgroups(groups.max(1), 1, 1);
+    }
+
+    encoder.copy_buffer_to_buffer(&buf_forces, 0, &buf_staging, 0, forces_bytes);
+    ctx.queue.submit(std::iter::once(encoder.finish()));
+
+    let slice = buf_staging.slice(..);
+    let (tx, rx) = mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx.send(result);
+    });
+    ctx.device.poll(wgpu::Maintain::Wait);
+    rx.recv()
+        .context("dpd: map_async channel closed")?
+        .map_err(|e| anyhow::anyhow!("dpd: map_async failed: {e:?}"))?;
+
+    let mapped = slice.get_mapped_range();
+    let result_f32: &[f32] = bytemuck::cast_slice(&mapped);
+
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
         out.push(Vec3::new(
             result_f32[i * 3 + 0],
             result_f32[i * 3 + 1],

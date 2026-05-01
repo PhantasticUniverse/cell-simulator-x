@@ -19,6 +19,33 @@ use glam::Vec3;
 use rand::prelude::*;
 use rand_distr::StandardNormal;
 
+/// PCG hash (32-bit). Stateless, no shared state, identical implementation
+/// in WGSL (`shaders/compute/dpd.wgsl`). Used to drive deterministic Gaussian
+/// noise for DPD on both CPU and GPU.
+#[inline]
+pub fn pcg_hash_u32(seed: u32) -> u32 {
+    let state = seed.wrapping_mul(747796405).wrapping_add(2891336453);
+    let word = ((state >> (((state >> 28).wrapping_add(4)) & 31)) ^ state).wrapping_mul(277803737);
+    (word >> 22) ^ word
+}
+
+/// Uniform [0, 1) from a hash key.
+#[inline]
+fn pcg_uniform(seed: u32) -> f32 {
+    pcg_hash_u32(seed) as f32 / 4_294_967_296.0_f32
+}
+
+/// Box-Muller pair → keep only the first (sin/cos pair would give two; we
+/// just take cos and discard the second value — the kernel does the same).
+#[inline]
+fn pcg_gaussian(seed1: u32, seed2: u32) -> f32 {
+    let u1 = pcg_uniform(seed1).max(1e-30);
+    let u2 = pcg_uniform(seed2);
+    let r = (-2.0_f32 * u1.ln()).sqrt();
+    let theta = 2.0_f32 * std::f32::consts::PI * u2;
+    r * theta.cos()
+}
+
 /// DPD particle for fluid dynamics
 #[derive(Debug, Clone)]
 pub struct DPDParticle {
@@ -205,6 +232,45 @@ impl DPDSolver {
                 forces[i] += total_force;
                 forces[j] -= total_force;
             }
+        }
+
+        forces
+    }
+
+    /// Stateless PCG-hash variant of `compute_membrane_forces`.
+    ///
+    /// Replaces the `StdRng`-based path with a stateless PCG hash keyed on
+    /// `(vertex_id, step_count, axis, seed)`. The output is bit-identical
+    /// between CPU and GPU when the same seed and step_count are used
+    /// (Phase 11.3.C). Use this path whenever you need reproducibility
+    /// across runs or CPU↔GPU parity.
+    pub fn compute_membrane_forces_pcg(
+        &self,
+        velocities: &[Vec3],
+        temperature_K: f32,
+        step_count: u32,
+        seed: u32,
+    ) -> Vec<Vec3> {
+        let n = velocities.len();
+        let mut forces = vec![Vec3::ZERO; n];
+
+        let kbt_J = 1.38e-23 * temperature_K;
+        let kbt = kbt_J * 1e12;
+        let sigma = (2.0 * self.params.dissipation_gamma * kbt).sqrt();
+        let gamma = self.params.dissipation_gamma;
+
+        for i in 0..n {
+            let vel = velocities[i];
+            let f_d = -vel * gamma * 0.001;
+            let key = ((i as u32).wrapping_mul(0x9E3779B1))
+                ^ step_count.wrapping_mul(0x85EBCA77)
+                ^ seed;
+            let gx = pcg_gaussian(key, key ^ 0x00000001);
+            let gy = pcg_gaussian(key ^ 0x00010000, key ^ 0x00010001);
+            let gz = pcg_gaussian(key ^ 0x00020000, key ^ 0x00020001);
+            let xi = Vec3::new(gx, gy, gz);
+            let f_r = xi * sigma * 0.0001;
+            forces[i] = f_d + f_r;
         }
 
         forces
