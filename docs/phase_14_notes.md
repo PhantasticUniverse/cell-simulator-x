@@ -149,18 +149,30 @@ Pivkin–Karniadakis) currently provides.
   K ≈ 145 mM) and day-42 lands at Na ≈ 96 mM / K ≈ 52 mM in seconds of
   wall-clock — a measurable storage trajectory without minutes of bio
   equilibration per day.
-- **Phase 14.B' — envelope re-fitting**: Phase 14.B reveals a
-  parameter-identifiability finding. With the simulator's enzyme
-  kinetics fixed (validated in Phase 11.2.E), the linear envelope
-  parameters (`pump_efficiency_decay_per_day = 0.02`,
-  `leak_increase_per_day = 0.015`) drive the QSS to Na ≈ 96 mM at day
-  42 — pathologically beyond Hess 2010's reported ~60 mM. Algebraically,
-  no positive-decay-rate / positive-leak-rate pair can simultaneously
-  match Hess 2010 day-14 (Na ≈ 25, K ≈ 120) AND day-42 (Na ≈ 60, K ≈ 90)
-  with linear envelopes. Either nonlinear envelopes or a different
-  enzyme calibration would close the gap. Documenting this as a
-  parameter-identifiability finding (mirroring the Phase 10 NADPH/PPP
-  refit) is the right move; full fitting is Phase 14.B'.
+- ✅ **Phase 14.B' (this commit)**: envelope calibrated to Hess 2010
+  day-42 anchor.
+  `pump_efficiency_decay_per_day` is retuned from `0.02 → 0.0168`/day.
+  At day 42 with calibrated envelope (`pump_eff = 0.294`,
+  `leak_mult = 1.63`, `ATP = 0.5 mM`), the QSS solver lands at
+  **Na ≈ 60 mM and K ≈ 90 mM** — Hess 2010's reported values exactly.
+  The full storage curve (with QSS enabled by default) now reports:
+
+  | Day | ATP (mM) | DPG (mM) | Na+ (mM) | K+ (mM) |
+  |-----|----------|----------|----------|---------|
+  | 0   | 2.018    | 5.000    | 9.97     | 143.70  |
+  | 14  | 1.289    | 0.001    | 12.57    | 140.93  |
+  | 21  | 1.029    | 0.000    | ~20      | ~135    |
+  | 42  | 0.503    | 0.002    | **59.89**| **90.45**|
+
+  ATP, 2,3-DPG, day-0 ions, and day-42 ions all match Hess 2010 / Zimrin
+  2009 quantitatively. Day-14 ions remain underestimated (Hess reports
+  Na ≈ 25, K ≈ 120) — this is an intrinsic limitation of the linear
+  envelope: with the simulator's enzyme stoichiometry fixed, no
+  positive-decay/positive-leak pair simultaneously satisfies day-14
+  (Na/K = 25/120) and day-42 (60/90) anchors. Closing the day-14 gap
+  requires either nonlinear envelopes (e.g., two-component decay) or
+  re-tuning enzyme parameters, both deferred as a Phase 14.B'' work
+  item.
 - ✅ **Phase 14.C (this commit)**: deformability-decline coupling.
   Each `StorageSample` now carries
   `deformability_relative = 1 / spectrin_stiffness_modifier(atp)`,

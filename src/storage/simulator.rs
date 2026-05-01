@@ -450,30 +450,23 @@ mod tests {
     }
 
     #[test]
-    fn ion_qss_day_42_in_pathological_range() {
-        // pump_eff = 1 - 0.02*42 = 0.16; leak_mult = 1 + 0.015*42 = 1.63;
-        // ATP at day 42 ≈ 0.5. With those envelope parameters, the QSS
-        // sits at Na ≈ 95 mM — pathologically high (Hess 2010 reports
-        // ~60 mM). The discrepancy reflects the linear envelope
-        // parameters, not a solver bug; closing it is a Phase 14.B
-        // tuning step (re-fit `pump_efficiency_decay_per_day` and
-        // `leak_increase_per_day` to Hess 2010 day-42 / day-14 anchors).
-        let pump_eff = 1.0 - 0.02 * 42.0;
+    fn ion_qss_day_42_matches_hess_2010() {
+        // Phase 14.B': with the calibrated `pump_efficiency_decay_per_day
+        // = 0.0168/day`, day-42 envelope is pump_eff = 0.294,
+        // leak_mult = 1.63, and ATP at day 42 ≈ 0.5. Solving QSS gives
+        // Na ≈ 60 mM and K ≈ 90 mM — Hess 2010's reported targets.
+        let pump_eff = 1.0 - 0.0168 * 42.0;
         let leak_mult = 1.0 + 0.015 * 42.0;
         let qss = solve_ion_qss(pump_eff, leak_mult, 0.5);
         println!("day-42 QSS Na={:.1} K={:.1}", qss.na_cyt_mM, qss.k_cyt_mM);
-        // Sanity bounds: pathological Na (>40 mM) and reduced K. Refining
-        // to Hess 2010's exact Na=60 is part of envelope re-fitting in a
-        // follow-on; for now just verify the solver moves Na firmly into
-        // the "membrane-failing" regime.
         assert!(
-            qss.na_cyt_mM > 40.0,
-            "day-42 QSS Na: {} (>40 mM expected)",
+            (qss.na_cyt_mM - 60.0).abs() < 5.0,
+            "day-42 QSS Na: {} (Hess 2010 ≈ 60)",
             qss.na_cyt_mM
         );
         assert!(
-            qss.k_cyt_mM < 130.0,
-            "day-42 QSS K: {} (<130 mM expected)",
+            (qss.k_cyt_mM - 90.0).abs() < 10.0,
+            "day-42 QSS K: {} (Hess 2010 ≈ 90)",
             qss.k_cyt_mM
         );
     }
