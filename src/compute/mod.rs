@@ -41,8 +41,8 @@ pub use biochem::{
 };
 pub use diagnostics::{run_diagnose_gpu, vec_add_gpu};
 pub use physics::{
-    run_dpd_membrane_forces, run_skalak_forces, run_wlc_forces, EdgeGpuPub, ElementGpuPub,
-    SkalakBackendData, WlcBackendData,
+    run_dpd_membrane_forces, run_skalak_forces, run_verlet_step, run_wlc_forces, EdgeGpuPub,
+    ElementGpuPub, SkalakBackendData, VerletConfig, WlcBackendData,
 };
 
 /// Headless wgpu compute context.

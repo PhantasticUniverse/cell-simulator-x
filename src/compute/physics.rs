@@ -19,6 +19,8 @@ use super::ComputeContext;
 const KERNEL_WGSL: &str = include_str!("../../shaders/compute/skalak.wgsl");
 const KERNEL_WLC_WGSL: &str = include_str!("../../shaders/compute/wlc.wgsl");
 const KERNEL_DPD_WGSL: &str = include_str!("../../shaders/compute/dpd.wgsl");
+const KERNEL_INTEGRATOR_WGSL: &str =
+    include_str!("../../shaders/compute/integrator.wgsl");
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -887,4 +889,256 @@ pub fn run_dpd_membrane_forces(
     buf_staging.unmap();
 
     Ok(out)
+}
+
+// =============================================================================
+// Phase 11.3.D — Velocity-Verlet integrator (half-step + position update)
+// =============================================================================
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct VerletUniforms {
+    n_vertices: u32,
+    half_dt: f32,
+    dt: f32,
+    inv_mass: f32,
+    accel_scale: f32,
+    max_velocity: f32,
+    max_displacement: f32,
+    _pad0: f32,
+}
+
+/// Configuration for the GPU Velocity-Verlet step.
+#[derive(Clone, Debug)]
+pub struct VerletConfig {
+    pub dt_sec: f32,
+    pub vertex_mass_pg: f32,
+    pub max_velocity_um_per_sec: f32,
+    pub max_displacement_um: f32,
+}
+
+impl Default for VerletConfig {
+    fn default() -> Self {
+        Self {
+            dt_sec: 1e-6,
+            vertex_mass_pg: 1.0,
+            max_velocity_um_per_sec: 1000.0,
+            max_displacement_um: 0.1,
+        }
+    }
+}
+
+/// Run one Velocity-Verlet step on the GPU. Mirrors
+/// `VelocityVerlet::half_step_velocity` followed by `step_position`. The
+/// `forces` slice is read-only; `positions` and `velocities` are updated
+/// in place.
+///
+/// The CPU side has a magic `accel_scale = 10.0` constant — same value is
+/// used here so unit conversions stay aligned.
+pub fn run_verlet_step(
+    ctx: &ComputeContext,
+    positions: &mut [Vec3],
+    velocities: &mut [Vec3],
+    forces: &[Vec3],
+    config: &VerletConfig,
+) -> Result<()> {
+    let n = positions.len();
+    if n != velocities.len() || n != forces.len() {
+        anyhow::bail!(
+            "verlet length mismatch: pos={}, vel={}, forces={}",
+            n,
+            velocities.len(),
+            forces.len()
+        );
+    }
+    if n == 0 {
+        return Ok(());
+    }
+
+    let mut pos_f32 = vec![0f32; n * 3];
+    let mut vel_f32 = vec![0f32; n * 3];
+    let mut force_f32 = vec![0f32; n * 3];
+    for i in 0..n {
+        pos_f32[i * 3 + 0] = positions[i].x;
+        pos_f32[i * 3 + 1] = positions[i].y;
+        pos_f32[i * 3 + 2] = positions[i].z;
+        vel_f32[i * 3 + 0] = velocities[i].x;
+        vel_f32[i * 3 + 1] = velocities[i].y;
+        vel_f32[i * 3 + 2] = velocities[i].z;
+        force_f32[i * 3 + 0] = forces[i].x;
+        force_f32[i * 3 + 1] = forces[i].y;
+        force_f32[i * 3 + 2] = forces[i].z;
+    }
+
+    let buf_forces = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("verlet forces"),
+        contents: bytemuck::cast_slice(&force_f32),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let buf_vel = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("verlet velocities"),
+        contents: bytemuck::cast_slice(&vel_f32),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+    let buf_pos = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("verlet positions"),
+        contents: bytemuck::cast_slice(&pos_f32),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+
+    let uniforms = VerletUniforms {
+        n_vertices: n as u32,
+        half_dt: config.dt_sec * 0.5,
+        dt: config.dt_sec,
+        inv_mass: 1.0 / config.vertex_mass_pg,
+        accel_scale: 10.0,
+        max_velocity: config.max_velocity_um_per_sec,
+        max_displacement: config.max_displacement_um,
+        _pad0: 0.0,
+    };
+    let buf_u = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("verlet uniforms"),
+        contents: bytemuck::bytes_of(&uniforms),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let bytes = (n * 3 * std::mem::size_of::<f32>()) as u64;
+    let buf_pos_staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("verlet pos staging"),
+        size: bytes,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let buf_vel_staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("verlet vel staging"),
+        size: bytes,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let storage_entry = |binding: u32, read_only: bool| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+
+    let bgl = ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("verlet bgl"),
+        entries: &[
+            storage_entry(0, true),  // forces (read-only)
+            storage_entry(1, false), // velocities (read-write)
+            storage_entry(2, false), // positions (read-write)
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
+    });
+
+    let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("verlet bg"),
+        layout: &bgl,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: buf_forces.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: buf_vel.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: buf_pos.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: buf_u.as_entire_binding() },
+        ],
+    });
+
+    let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("verlet shader"),
+        source: wgpu::ShaderSource::Wgsl(KERNEL_INTEGRATOR_WGSL.into()),
+    });
+
+    let pl = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("verlet pl"),
+        bind_group_layouts: &[&bgl],
+        push_constant_ranges: &[],
+    });
+    let pipe_half = ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("verlet half_step pipeline"),
+        layout: Some(&pl),
+        module: &shader,
+        entry_point: "verlet_half_step_velocity",
+        compilation_options: Default::default(),
+    });
+    let pipe_pos = ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("verlet step_position pipeline"),
+        layout: Some(&pl),
+        module: &shader,
+        entry_point: "verlet_step_position",
+        compilation_options: Default::default(),
+    });
+
+    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("verlet encoder"),
+    });
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("verlet pass"),
+            timestamp_writes: None,
+        });
+        pass.set_bind_group(0, &bg, &[]);
+        let groups = ((n as u32) + 63) / 64;
+        pass.set_pipeline(&pipe_half);
+        pass.dispatch_workgroups(groups.max(1), 1, 1);
+        pass.set_pipeline(&pipe_pos);
+        pass.dispatch_workgroups(groups.max(1), 1, 1);
+    }
+
+    encoder.copy_buffer_to_buffer(&buf_pos, 0, &buf_pos_staging, 0, bytes);
+    encoder.copy_buffer_to_buffer(&buf_vel, 0, &buf_vel_staging, 0, bytes);
+    ctx.queue.submit(std::iter::once(encoder.finish()));
+
+    let pos_slice = buf_pos_staging.slice(..);
+    let (tx_pos, rx_pos) = mpsc::channel();
+    pos_slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx_pos.send(r); });
+    let vel_slice = buf_vel_staging.slice(..);
+    let (tx_vel, rx_vel) = mpsc::channel();
+    vel_slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx_vel.send(r); });
+
+    ctx.device.poll(wgpu::Maintain::Wait);
+    rx_pos.recv()
+        .context("verlet: pos map_async channel closed")?
+        .map_err(|e| anyhow::anyhow!("verlet: pos map_async failed: {e:?}"))?;
+    rx_vel.recv()
+        .context("verlet: vel map_async channel closed")?
+        .map_err(|e| anyhow::anyhow!("verlet: vel map_async failed: {e:?}"))?;
+
+    let mapped_pos = pos_slice.get_mapped_range();
+    let pos_out: &[f32] = bytemuck::cast_slice(&mapped_pos);
+    let mapped_vel = vel_slice.get_mapped_range();
+    let vel_out: &[f32] = bytemuck::cast_slice(&mapped_vel);
+
+    for i in 0..n {
+        positions[i] = Vec3::new(
+            pos_out[i * 3 + 0],
+            pos_out[i * 3 + 1],
+            pos_out[i * 3 + 2],
+        );
+        velocities[i] = Vec3::new(
+            vel_out[i * 3 + 0],
+            vel_out[i * 3 + 1],
+            vel_out[i * 3 + 2],
+        );
+    }
+
+    drop(mapped_pos);
+    drop(mapped_vel);
+    buf_pos_staging.unmap();
+    buf_vel_staging.unmap();
+
+    Ok(())
 }
