@@ -151,6 +151,37 @@ fn full_curve_has_one_sample_per_day() {
 }
 
 #[test]
+fn deformability_declines_monotonically() {
+    let sim = run_full_curve();
+    let d0 = sim.sample_at_day(0.0).unwrap().deformability_relative;
+    let d14 = sim.sample_at_day(14.0).unwrap().deformability_relative;
+    let d21 = sim.sample_at_day(21.0).unwrap().deformability_relative;
+    let d42 = sim.sample_at_day(42.0).unwrap().deformability_relative;
+    println!(
+        "deformability: d0={:.3} d14={:.3} d21={:.3} d42={:.3}",
+        d0, d14, d21, d42
+    );
+
+    // Phase 14.C: deformability is 1/spectrin_stiffness_modifier.
+    // SpectrinModulator default: max_stiffening_factor = 0.5 → at ATP=0
+    // modifier=1.5 → def=0.667. With ATP at d0=2.0, d42=0.5:
+    //   d0 = 1.0 (modifier=1)
+    //   d42 = 1/(1 + 0.5*0.75) = 1/1.375 ≈ 0.727
+    assert!((d0 - 1.0).abs() < 0.01, "day-0 deformability: {} (≈ 1.0)", d0);
+    assert!(d14 < d0, "deformability must drop by day 14");
+    assert!(d21 < d14, "deformability must drop by day 21");
+    assert!(d42 < d21, "deformability must drop by day 42");
+    // Hess 2010 / Pivkin et al. 2011 report ~30% deformability decline
+    // at day 42; the SpectrinModulator default puts us at ~27%, which
+    // matches without further tuning.
+    assert!(
+        d42 > 0.65 && d42 < 0.80,
+        "day-42 deformability: {} (target ~0.7)",
+        d42
+    );
+}
+
+#[test]
 fn write_csv_succeeds() {
     let sim = run_full_curve();
     let dir = std::env::temp_dir();

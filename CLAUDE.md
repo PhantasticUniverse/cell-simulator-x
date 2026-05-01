@@ -76,6 +76,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 12.A: External fluid — analytic Poiseuille + drag ✅ (`flow::Poiseuille` + `apply_drag_to_external_forces`; CPU integration test shows directional cell drift under flow; `PhysicsBackend` integration + parachute/tank-treading validation deferred to 12.B/C; see `docs/phase_12_notes.md`)
 - Phase 14.A: Storage lesion at physiological timescale ✅ (multi-rate ms/s/day scheme; `StorageCurveSimulator` produces 42-day metabolite trajectory matching Hess 2010 ATP and 2,3-DPG envelopes; ion gradients trend correctly but quantitative Hess targets need Phase 14.B analytic QSS; see `docs/phase_14_notes.md`)
 - Phase 14.B: Analytic ion quasi-steady-state ✅ (`solve_ion_qss` bisection drives Na+/K+ to pump+leak equilibrium each storage day; day-42 QSS lands at Na≈96 mM (Hess 2010 reports ~60 mM — gap is a parameter-identifiability finding for envelope re-fitting in 14.B'); Hess 2010 quantitative match deferred to envelope re-fit)
+- Phase 14.C: Deformability decline coupling ✅ (`StorageSample::deformability_relative` from Phase 8 `SpectrinModulator`'s ATP→stiffness; 1.000 → 0.728 over 42 days, matches ~30% decline reported by Hess 2010 / Pivkin 2011)
 
 ## Development
 

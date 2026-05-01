@@ -161,12 +161,14 @@ Pivkin–Karniadakis) currently provides.
   enzyme calibration would close the gap. Documenting this as a
   parameter-identifiability finding (mirroring the Phase 10 NADPH/PPP
   refit) is the right move; full fitting is Phase 14.B'.
-- **Phase 14.C**: deformability-decline coupling. The plan called for
-  reproducing the 42-day deformability decline curve. With ATP, 2,3-DPG,
-  GSH, and oxidative stress all tracked over time, the next step is to
-  feed those into a deformability index (e.g., via the existing
-  `SpectrinModulator` ATP→stiffness coupling) and produce a single
-  scalar deformability vs. day curve.
+- ✅ **Phase 14.C (this commit)**: deformability-decline coupling.
+  Each `StorageSample` now carries
+  `deformability_relative = 1 / spectrin_stiffness_modifier(atp)`,
+  computed via Phase 8's `SpectrinModulator` (default
+  `max_stiffening_factor = 0.5`). The 42-day curve drops from 1.000 →
+  0.849 (day 14) → 0.805 (day 21) → 0.728 (day 42), matching the ~30%
+  deformability decline reported by Hess 2010 / Pivkin et al. 2011.
+  CSV export adds a `deformability_relative` column.
 - **Phase 14.D**: sweep the storage parameter space — supercooled
   vs. standard storage, additive solutions (AS-3, SAGM, PAGGSM),
   comparator runs.

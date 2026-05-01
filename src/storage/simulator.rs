@@ -8,6 +8,7 @@ use crate::biochemistry::disease::StorageLesionModel;
 use crate::biochemistry::{
     FullyIntegratedConfig, FullyIntegratedIndices, FullyIntegratedSolver, MetabolitePool,
 };
+use crate::coupling::SpectrinModulator;
 
 /// Per-day sample of the cell state.
 #[derive(Debug, Clone, Copy)]
@@ -25,6 +26,14 @@ pub struct StorageSample {
     pub pump_efficiency: f64,
     pub leak_multiplier: f64,
     pub oxidative_stress: f64,
+    /// Phase 14.C — deformability index relative to day 0. 1.0 = fresh,
+    /// < 1.0 = less deformable. Currently driven by `SpectrinModulator`'s
+    /// ATP→stiffness coupling (Manno et al., PNAS 2002): lower ATP →
+    /// higher spectrin stiffness → lower membrane deformability. This is
+    /// a coarse proxy; refining to ektacytometry-style deformation
+    /// indices is part of Phase 15 (disease & drug-screening
+    /// extensions).
+    pub deformability_relative: f64,
 }
 
 /// Configuration for the storage curve simulator.
@@ -73,6 +82,9 @@ pub struct StorageCurveSimulator {
     pub pool: MetabolitePool,
     pub storage: StorageLesionModel,
     pub config: StorageSimConfig,
+    /// ATP→stiffness coupling (Phase 8). Used to project the membrane
+    /// deformability index from current ATP at each storage day.
+    pub spectrin_modulator: SpectrinModulator,
     samples: Vec<StorageSample>,
     indices: FullyIntegratedIndices,
 }
@@ -96,11 +108,16 @@ impl StorageCurveSimulator {
         let pool = MetabolitePool::default_fully_integrated();
         let storage = StorageLesionModel::new(0.0);
         let indices = FullyIntegratedIndices::new();
+        // Default Phase 8 coupling: ATP_ref = 2.0 mM, max stiffening
+        // factor = 0.5 (50% stiffer at zero ATP). This sets the ATP →
+        // deformability mapping used in `sample()`.
+        let spectrin_modulator = SpectrinModulator::new(2.0, 0.5);
         Self {
             solver,
             pool,
             storage,
             config,
+            spectrin_modulator,
             samples: Vec::new(),
             indices,
         }
@@ -109,9 +126,19 @@ impl StorageCurveSimulator {
     /// Snapshot of the current state.
     fn sample(&self) -> StorageSample {
         let i = &self.indices;
+        let atp = self.pool.get(i.glycolysis.atp);
+        // Deformability index relative to fresh (day 0). Phase 14.C uses
+        // the inverse of `SpectrinModulator`'s ATP→stiffness modifier so
+        // a fresh ATP=2.0 mM gives 1.0 and ATP→0 gives 1/(1 + max_stiff).
+        // This is a coarse coupling — adding GSH-driven oxidative
+        // stiffening is a clean future extension once D'Alessandro et
+        // al. spectrin oxidation kinetics are fit.
+        let stiff = self.spectrin_modulator.stiffness_modifier(atp) as f64;
+        let deformability_relative = if stiff > 1e-9 { 1.0 / stiff } else { 0.0 };
+
         StorageSample {
             day: self.storage.storage_days,
-            atp_mM: self.pool.get(i.glycolysis.atp),
+            atp_mM: atp,
             dpg23_mM: self.pool.get(i.bisphosphoglycerate_2_3),
             gsh_mM: self.pool.get(i.redox.gsh),
             gssg_mM: self.pool.get(i.redox.gssg),
@@ -123,6 +150,7 @@ impl StorageCurveSimulator {
             pump_efficiency: pump_efficiency(&self.storage),
             leak_multiplier: leak_multiplier(&self.storage),
             oxidative_stress: oxidative_stress(&self.storage),
+            deformability_relative,
         }
     }
 
@@ -222,7 +250,7 @@ impl StorageCurveSimulator {
         wtr.write_record(&[
             "day", "atp_mM", "dpg23_mM", "gsh_mM", "gssg_mM", "h2o2_mM", "nadph_mM",
             "na_cyt_mM", "k_cyt_mM", "lactate_mM", "pump_efficiency",
-            "leak_multiplier", "oxidative_stress",
+            "leak_multiplier", "oxidative_stress", "deformability_relative",
         ])?;
         for s in &self.samples {
             wtr.write_record(&[
@@ -239,6 +267,7 @@ impl StorageCurveSimulator {
                 format!("{:.6}", s.pump_efficiency),
                 format!("{:.6}", s.leak_multiplier),
                 format!("{:.6}", s.oxidative_stress),
+                format!("{:.6}", s.deformability_relative),
             ])?;
         }
         wtr.flush()?;
