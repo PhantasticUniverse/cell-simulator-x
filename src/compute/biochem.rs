@@ -28,7 +28,9 @@ use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::biochemistry::{ExtendedMetaboliteIndices, FullyIntegratedIndices, MetabolitePool};
+use crate::biochemistry::{
+    AdairConstants, ExtendedMetaboliteIndices, FullyIntegratedIndices, MetabolitePool,
+};
 
 use super::ComputeContext;
 
@@ -301,7 +303,7 @@ pub fn run_glycolysis_batch(
 }
 
 // =============================================================================
-// Phase 11.2.C — Full 38-species biochem kernel
+// Phase 11.2.C/D — Full 38-species biochem kernel
 // =============================================================================
 
 /// Uniforms for the full biochem kernel (must match WGSL `struct U`).
@@ -325,6 +327,31 @@ struct FullBiochemUniforms {
     k_external_mM: f32,
     g_na_per_sec: f32,
     g_k_per_sec: f32,
+    // Phase 11.2.D additions:
+    po2_mmHg: f32,
+    pco2_mmHg: f32,
+    temperature_K: f32,
+    total_hb_mM: f32,
+    base_p50_mmHg: f32,
+    bohr_coefficient: f32,
+    dpg_effect_mmHg_per_mM: f32,
+    dpg_reference_mM: f32,
+    delta_h_kcal_per_mol: f32,
+    temperature_reference_K: f32,
+    co2_effect_per_mmHg: f32,
+    pco2_reference_mmHg: f32,
+    k_on_per_mM_per_sec: f32,
+    k_off_per_sec: f32,
+    buffer_capacity_slykes: f32,
+    ph_reference: f32,
+    baseline_lactate_mM: f32,
+    min_ph: f32,
+    max_ph: f32,
+    enable_hb: u32,
+    adair_k1: f32,
+    adair_k2: f32,
+    adair_k3: f32,
+    adair_k4: f32,
     _pad0: f32,
     _pad1: f32,
     _pad2: f32,
@@ -333,8 +360,9 @@ struct FullBiochemUniforms {
 /// Configuration for one full biochem batch dispatch.
 ///
 /// Mirrors `FullyIntegratedConfig` (CPU side) for the parameters consumed by
-/// the GPU kernel. Hb / pH / inline-homeostasis-hacks are still CPU-side
-/// (deferred to Phases 11.2.D–E).
+/// the GPU kernel. The three inline homeostasis hacks (basal NADPH
+/// consumption, basal GSH oxidation, ATP regen) remain CPU-side, deferred to
+/// 11.2.E.
 #[derive(Clone, Debug)]
 pub struct FullBiochemBatchConfig {
     /// Integration timestep in seconds.
@@ -369,10 +397,64 @@ pub struct FullBiochemBatchConfig {
     pub g_na_per_sec: f64,
     /// K⁺ leak conductance.
     pub g_k_per_sec: f64,
+
+    // === Phase 11.2.D: Hb + pH ===
+
+    /// Enable post-RK4 hemoglobin Adair update + pH buffer. When false
+    /// (default), the kernel runs identically to 11.2.C and the `hb_state`
+    /// buffer is untouched (caller may pass a dummy slice).
+    pub enable_hb: bool,
+    /// Constant world-level oxygen partial pressure (mmHg).
+    pub po2_mmHg: f64,
+    /// Constant world-level CO₂ partial pressure (mmHg).
+    pub pco2_mmHg: f64,
+    /// Temperature in Kelvin (used for van't Hoff).
+    pub temperature_K: f64,
+    /// Total hemoglobin tetramer concentration (mM).
+    pub total_hb_mM: f64,
+    /// Base P50 at standard conditions (mmHg).
+    pub base_p50_mmHg: f64,
+    /// Bohr coefficient ΔlogP50/ΔpH.
+    pub bohr_coefficient: f64,
+    /// 2,3-DPG effect on P50 (mmHg per mM).
+    pub dpg_effect_mmHg_per_mM: f64,
+    /// Reference 2,3-DPG concentration (mM).
+    pub dpg_reference_mM: f64,
+    /// Enthalpy of oxygenation (kcal/mol O₂).
+    pub delta_h_kcal_per_mol: f64,
+    /// Reference temperature for van't Hoff (K).
+    pub temperature_reference_K: f64,
+    /// CO₂ effect on logP50 per mmHg.
+    pub co2_effect_per_mmHg: f64,
+    /// Reference pCO₂ (mmHg).
+    pub pco2_reference_mmHg: f64,
+    /// O₂ binding rate constant (mM⁻¹·s⁻¹).
+    pub k_on_per_mM_per_sec: f64,
+    /// O₂ dissociation rate constant (s⁻¹).
+    pub k_off_per_sec: f64,
+    /// Total RBC cytoplasmic buffer capacity (slykes = mM/pH unit).
+    pub buffer_capacity_slykes: f64,
+    /// Reference pH at baseline lactate.
+    pub ph_reference: f64,
+    /// Baseline lactate concentration (mM).
+    pub baseline_lactate_mM: f64,
+    /// Min pH clamp.
+    pub min_ph: f64,
+    /// Max pH clamp.
+    pub max_ph: f64,
+    /// Base Adair K₁ (mmHg⁻¹). Defaults to `AdairConstants::default()`.
+    pub adair_k1_per_mmHg: f64,
+    /// Base Adair K₂ (mmHg⁻¹).
+    pub adair_k2_per_mmHg: f64,
+    /// Base Adair K₃ (mmHg⁻¹).
+    pub adair_k3_per_mmHg: f64,
+    /// Base Adair K₄ (mmHg⁻¹).
+    pub adair_k4_per_mmHg: f64,
 }
 
 impl Default for FullBiochemBatchConfig {
     fn default() -> Self {
+        let adair = AdairConstants::default();
         Self {
             dt_sec: 0.001,
             n_steps: 1000,
@@ -385,12 +467,37 @@ impl Default for FullBiochemBatchConfig {
             membrane_tension_pN_per_nm: 0.5,
             enable_piezo1: true,
             enable_ion_homeostasis: true,
-            // 5 µM/s — matches `BASAL_H2O2_PRODUCTION_MM_PER_SEC` in glutathione.rs.
             h2o2_production_rate_mM_per_sec: 0.005,
             na_external_mM: 140.0,
             k_external_mM: 5.0,
             g_na_per_sec: 0.00024,
             g_k_per_sec: 0.00015,
+            // Hb defaults match `HemoglobinSolver::default()` /
+            // `AllostericParameters::default()` / `PhBufferModel::default()`.
+            enable_hb: false,
+            po2_mmHg: 100.0,
+            pco2_mmHg: 40.0,
+            temperature_K: 310.15,
+            total_hb_mM: 5.0,
+            base_p50_mmHg: 26.8,
+            bohr_coefficient: -0.48,
+            dpg_effect_mmHg_per_mM: 2.4,
+            dpg_reference_mM: 5.0,
+            delta_h_kcal_per_mol: -14.5,
+            temperature_reference_K: 310.15,
+            co2_effect_per_mmHg: 0.02,
+            pco2_reference_mmHg: 40.0,
+            k_on_per_mM_per_sec: 25.0,
+            k_off_per_sec: 30.0,
+            buffer_capacity_slykes: 60.0,
+            ph_reference: 7.2,
+            baseline_lactate_mM: 1.5,
+            min_ph: 6.8,
+            max_ph: 7.6,
+            adair_k1_per_mmHg: adair.k1_per_mmHg,
+            adair_k2_per_mmHg: adair.k2_per_mmHg,
+            adair_k3_per_mmHg: adair.k3_per_mmHg,
+            adair_k4_per_mmHg: adair.k4_per_mmHg,
         }
     }
 }
@@ -399,7 +506,9 @@ impl Default for FullBiochemBatchConfig {
 ///
 /// Operates on all 38 species of `FullyIntegratedIndices`. Each pool must
 /// have at least 38 species; the kernel touches indices 0..38 in place and
-/// leaves later indices (if any) untouched.
+/// leaves later indices (if any) untouched. The `hb_state` buffer is bound
+/// but unused unless `config.enable_hb` is true (in which case use
+/// [`run_full_biochem_batch_with_hb`] instead).
 ///
 /// One dispatch advances every cell by `n_steps * dt_sec` of simulated time.
 /// The pipeline + bind group are recreated per call (will be cached in a
@@ -407,6 +516,39 @@ impl Default for FullBiochemBatchConfig {
 pub fn run_full_biochem_batch(
     ctx: &ComputeContext,
     pools: &mut [MetabolitePool],
+    config: &FullBiochemBatchConfig,
+) -> Result<()> {
+    run_full_biochem_internal(ctx, pools, None, config)
+}
+
+/// Run a multi-cell full biochem batch on the GPU with the post-RK4 Hb +
+/// pH update enabled. `hb_saturations` must have length equal to `pools`;
+/// each entry is the per-cell hemoglobin saturation (0..1), updated in
+/// place. The caller is responsible for setting `config.enable_hb = true`
+/// to actually drive the Hb update — this function will set it for safety
+/// regardless.
+pub fn run_full_biochem_batch_with_hb(
+    ctx: &ComputeContext,
+    pools: &mut [MetabolitePool],
+    hb_saturations: &mut [f64],
+    config: &FullBiochemBatchConfig,
+) -> Result<()> {
+    if pools.len() != hb_saturations.len() {
+        anyhow::bail!(
+            "hb_saturations length ({}) must match pools length ({})",
+            hb_saturations.len(),
+            pools.len()
+        );
+    }
+    let mut config = config.clone();
+    config.enable_hb = true;
+    run_full_biochem_internal(ctx, pools, Some(hb_saturations), &config)
+}
+
+fn run_full_biochem_internal(
+    ctx: &ComputeContext,
+    pools: &mut [MetabolitePool],
+    hb_saturations: Option<&mut [f64]>,
     config: &FullBiochemBatchConfig,
 ) -> Result<()> {
     let n_cells = pools.len();
@@ -479,6 +621,21 @@ pub fn run_full_biochem_batch(
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
 
+    // Hb-state buffer: always present (even when disabled) so the bind
+    // group layout is stable across both call paths.
+    let mut hb_init: Vec<f32> = vec![0.0; n_cells];
+    if let Some(ref hbs) = hb_saturations {
+        for (i, &s) in hbs.iter().enumerate() {
+            hb_init[i] = s as f32;
+        }
+    }
+    let buf_hb = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("full biochem hb_state"),
+        contents: bytemuck::cast_slice(&hb_init),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+    let hb_bytes = (hb_init.len() * std::mem::size_of::<f32>()) as u64;
+
     let uniforms = FullBiochemUniforms {
         n_cells: n_cells as u32,
         n_steps: config.n_steps,
@@ -497,6 +654,30 @@ pub fn run_full_biochem_batch(
         k_external_mM: config.k_external_mM as f32,
         g_na_per_sec: config.g_na_per_sec as f32,
         g_k_per_sec: config.g_k_per_sec as f32,
+        po2_mmHg: config.po2_mmHg as f32,
+        pco2_mmHg: config.pco2_mmHg as f32,
+        temperature_K: config.temperature_K as f32,
+        total_hb_mM: config.total_hb_mM as f32,
+        base_p50_mmHg: config.base_p50_mmHg as f32,
+        bohr_coefficient: config.bohr_coefficient as f32,
+        dpg_effect_mmHg_per_mM: config.dpg_effect_mmHg_per_mM as f32,
+        dpg_reference_mM: config.dpg_reference_mM as f32,
+        delta_h_kcal_per_mol: config.delta_h_kcal_per_mol as f32,
+        temperature_reference_K: config.temperature_reference_K as f32,
+        co2_effect_per_mmHg: config.co2_effect_per_mmHg as f32,
+        pco2_reference_mmHg: config.pco2_reference_mmHg as f32,
+        k_on_per_mM_per_sec: config.k_on_per_mM_per_sec as f32,
+        k_off_per_sec: config.k_off_per_sec as f32,
+        buffer_capacity_slykes: config.buffer_capacity_slykes as f32,
+        ph_reference: config.ph_reference as f32,
+        baseline_lactate_mM: config.baseline_lactate_mM as f32,
+        min_ph: config.min_ph as f32,
+        max_ph: config.max_ph as f32,
+        enable_hb: u32::from(config.enable_hb),
+        adair_k1: config.adair_k1_per_mmHg as f32,
+        adair_k2: config.adair_k2_per_mmHg as f32,
+        adair_k3: config.adair_k3_per_mmHg as f32,
+        adair_k4: config.adair_k4_per_mmHg as f32,
         _pad0: 0.0,
         _pad1: 0.0,
         _pad2: 0.0,
@@ -510,6 +691,13 @@ pub fn run_full_biochem_batch(
     let buf_staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("full biochem staging"),
         size: bytes,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let buf_hb_staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("full biochem hb staging"),
+        size: hb_bytes,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -537,6 +725,16 @@ pub fn run_full_biochem_batch(
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -546,6 +744,7 @@ pub fn run_full_biochem_batch(
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: buf_state.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 1, resource: buf_u.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: buf_hb.as_entire_binding() },
         ],
     });
 
@@ -584,21 +783,41 @@ pub fn run_full_biochem_batch(
     }
 
     encoder.copy_buffer_to_buffer(&buf_state, 0, &buf_staging, 0, bytes);
+    encoder.copy_buffer_to_buffer(&buf_hb, 0, &buf_hb_staging, 0, hb_bytes);
     ctx.queue.submit(std::iter::once(encoder.finish()));
 
-    // === Download ===
+    // === Download state ===
     let slice = buf_staging.slice(..);
     let (tx, rx) = mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = tx.send(result);
     });
+
+    // Map Hb buffer in parallel.
+    let hb_slice = buf_hb_staging.slice(..);
+    let (tx_hb, rx_hb) = mpsc::channel();
+    hb_slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx_hb.send(result);
+    });
+
     ctx.device.poll(wgpu::Maintain::Wait);
     rx.recv()
         .context("full biochem: map_async channel closed")?
         .map_err(|e| anyhow::anyhow!("full biochem: map_async failed: {e:?}"))?;
+    rx_hb.recv()
+        .context("full biochem: hb map_async channel closed")?
+        .map_err(|e| anyhow::anyhow!("full biochem: hb map_async failed: {e:?}"))?;
 
     let mapped = slice.get_mapped_range();
     let result_f32: &[f32] = bytemuck::cast_slice(&mapped);
+    let mapped_hb = hb_slice.get_mapped_range();
+    let hb_f32: &[f32] = bytemuck::cast_slice(&mapped_hb);
+
+    if let Some(hbs) = hb_saturations {
+        for (i, slot) in hbs.iter_mut().enumerate() {
+            *slot = hb_f32[i] as f64;
+        }
+    }
 
     // === Distribute back ===
     for (cell_idx, pool) in pools.iter_mut().enumerate() {
@@ -645,7 +864,9 @@ pub fn run_full_biochem_batch(
     }
 
     drop(mapped);
+    drop(mapped_hb);
     buf_staging.unmap();
+    buf_hb_staging.unmap();
 
     Ok(())
 }

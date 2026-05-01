@@ -35,7 +35,8 @@ pub mod biochem;
 pub mod diagnostics;
 
 pub use biochem::{
-    run_full_biochem_batch, run_glycolysis_batch, FullBiochemBatchConfig, GlycolysisBatchConfig,
+    run_full_biochem_batch, run_full_biochem_batch_with_hb, run_glycolysis_batch,
+    FullBiochemBatchConfig, GlycolysisBatchConfig,
 };
 pub use diagnostics::{run_diagnose_gpu, vec_add_gpu};
 

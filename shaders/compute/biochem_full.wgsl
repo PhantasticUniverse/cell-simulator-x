@@ -84,6 +84,10 @@ const K_ION:   u32 = 36u;
 const CL:      u32 = 37u;
 
 // === Uniforms — world-level constants and dispatch parameters ===
+//
+// Phase 11.2.D extension: the post-RK4 hemoglobin (Adair) update + pH buffer
+// are folded into the inner step loop, gated by `enable_hb`. Per-cell Hb
+// saturation lives in the separate `hb_state` storage buffer at binding 2.
 struct U {
     n_cells: u32,
     n_steps: u32,
@@ -102,6 +106,31 @@ struct U {
     k_external_mM: f32,
     g_na_per_sec: f32,
     g_k_per_sec: f32,
+    // === Phase 11.2.D additions: Hb + pH ===
+    po2_mmHg: f32,
+    pco2_mmHg: f32,
+    temperature_K: f32,
+    total_hb_mM: f32,
+    base_p50_mmHg: f32,
+    bohr_coefficient: f32,
+    dpg_effect_mmHg_per_mM: f32,
+    dpg_reference_mM: f32,
+    delta_h_kcal_per_mol: f32,
+    temperature_reference_K: f32,
+    co2_effect_per_mmHg: f32,
+    pco2_reference_mmHg: f32,
+    k_on_per_mM_per_sec: f32,
+    k_off_per_sec: f32,
+    buffer_capacity_slykes: f32,
+    ph_reference: f32,
+    baseline_lactate_mM: f32,
+    min_ph: f32,
+    max_ph: f32,
+    enable_hb: u32,
+    adair_k1: f32,
+    adair_k2: f32,
+    adair_k3: f32,
+    adair_k4: f32,
     _pad0: f32,
     _pad1: f32,
     _pad2: f32,
@@ -109,6 +138,7 @@ struct U {
 
 @group(0) @binding(0) var<storage, read_write> state: array<f32>;
 @group(0) @binding(1) var<uniform>             u: U;
+@group(0) @binding(2) var<storage, read_write> hb_state: array<f32>;
 
 // === Kinetic helpers (mirror src/biochemistry/enzyme.rs) ============
 
@@ -646,6 +676,92 @@ fn derivatives(y: ptr<function, array<f32, 38>>, dydt: ptr<function, array<f32, 
     }
 }
 
+// === pH buffer + Hemoglobin Adair binding (Phase 11.2.D) ============
+//
+// Mirrors `PhBufferModel::calculate_ph` and `HemoglobinSolver::step` from
+// the CPU side. The CPU runs *one* post-RK4 Euler update per millisecond
+// step, so the GPU does the same inside the inner loop.
+
+const STANDARD_PH: f32 = 7.4;  // Bohr reference pH (hardcoded in CPU side).
+const LN10: f32 = 2.302585093;
+
+// Compute intracellular pH from cytosolic lactate.
+fn compute_ph(lactate: f32) -> f32 {
+    let delta_lac = lactate - u.baseline_lactate_mM;
+    let delta_ph = -delta_lac / u.buffer_capacity_slykes;
+    return clamp(u.ph_reference + delta_ph, u.min_ph, u.max_ph);
+}
+
+// Effective P50 with Bohr / DPG / temp / CO2 modulation.
+fn effective_p50(ph: f32, dpg_mM: f32) -> f32 {
+    var log_p50 = log(u.base_p50_mmHg) / LN10;
+
+    // Bohr.
+    let delta_ph = ph - STANDARD_PH;
+    log_p50 = log_p50 + u.bohr_coefficient * delta_ph;
+
+    // DPG: convert log_p50 → linear, add ΔP50, back to log.
+    let delta_dpg = dpg_mM - u.dpg_reference_mM;
+    let p50_after_bohr = pow(10.0, log_p50);
+    let p50_with_dpg = p50_after_bohr + u.dpg_effect_mmHg_per_mM * delta_dpg;
+    log_p50 = log(max(p50_with_dpg, 1.0)) / LN10;
+
+    // Temperature (van't Hoff).
+    let delta_t = u.temperature_K - u.temperature_reference_K;
+    if (abs(delta_t) > 0.01) {
+        // R = 1.987 cal/(mol·K).
+        let r_cal_per_mol_k: f32 = 1.987;
+        let t_factor = u.delta_h_kcal_per_mol * 1000.0 * delta_t
+            / (LN10 * r_cal_per_mol_k * u.temperature_reference_K * u.temperature_reference_K);
+        log_p50 = log_p50 - t_factor;
+    }
+
+    // CO2.
+    let delta_co2 = u.pco2_mmHg - u.pco2_reference_mmHg;
+    log_p50 = log_p50 + u.co2_effect_per_mmHg * delta_co2;
+
+    return clamp(pow(10.0, log_p50), 5.0, 100.0);
+}
+
+// Equilibrium saturation via the Adair 4-site cooperative binding model.
+fn saturation_adair(po2: f32, k1: f32, k2: f32, k3: f32, k4: f32) -> f32 {
+    if (po2 <= 0.0) { return 0.0; }
+    // Cumulative binding constants.
+    let a1 = k1;
+    let a2 = a1 * k2;
+    let a3 = a2 * k3;
+    let a4 = a3 * k4;
+    let p = po2;
+    let p2 = p * p;
+    let p3 = p2 * p;
+    let p4 = p3 * p;
+    let num = a1 * p + 2.0 * a2 * p2 + 3.0 * a3 * p3 + 4.0 * a4 * p4;
+    let den = 4.0 * (1.0 + a1 * p + a2 * p2 + a3 * p3 + a4 * p4);
+    if (den <= 0.0) { return 0.0; }
+    return clamp(num / den, 0.0, 1.0);
+}
+
+// Per-step Euler update of Hb saturation toward equilibrium.
+fn hb_post_step(lactate: f32, dpg_mM: f32, current_sat: f32) -> f32 {
+    let ph = compute_ph(lactate);
+    let p50 = effective_p50(ph, dpg_mM);
+    let p50_ratio = u.base_p50_mmHg / p50;
+
+    // Effective Adair constants scale linearly with P50 ratio.
+    let k1 = u.adair_k1 * p50_ratio;
+    let k2 = u.adair_k2 * p50_ratio;
+    let k3 = u.adair_k3 * p50_ratio;
+    let k4 = u.adair_k4 * p50_ratio;
+
+    let y_eq = saturation_adair(u.po2_mmHg, k1, k2, k3, k4);
+    let max_o2 = 4.0 * u.total_hb_mM;
+    let o2_mM = u.po2_mmHg / 760.0;  // Henry's law approximation, matching CPU.
+    let k_eff = u.k_on_per_mM_per_sec * o2_mM + u.k_off_per_sec;
+    let rate = k_eff * (y_eq - current_sat) * max_o2;
+    let bound_o2 = clamp(current_sat * max_o2 + rate * u.dt_sec, 0.0, max_o2);
+    return bound_o2 / max_o2;
+}
+
 // === RK4 step =======================================================
 
 fn apply_clamp_and_floor(y_old: f32, dy: f32) -> f32 {
@@ -663,6 +779,11 @@ fn rk4_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     var y: array<f32, 38>;
     for (var i = 0u; i < N_SPECIES; i = i + 1u) {
         y[i] = state[base + i];
+    }
+
+    var sat: f32 = 0.0;
+    if (u.enable_hb != 0u) {
+        sat = hb_state[cell];
     }
 
     for (var step = 0u; step < u.n_steps; step = step + 1u) {
@@ -694,9 +815,17 @@ fn rk4_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             let dy = dt6 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
             y[i] = apply_clamp_and_floor(y[i], dy);
         }
+
+        // Post-RK4 Hb + pH update (Phase 11.2.D).
+        if (u.enable_hb != 0u) {
+            sat = hb_post_step(y[LAC], y[BPG23], sat);
+        }
     }
 
     for (var i = 0u; i < N_SPECIES; i = i + 1u) {
         state[base + i] = y[i];
+    }
+    if (u.enable_hb != 0u) {
+        hb_state[cell] = sat;
     }
 }

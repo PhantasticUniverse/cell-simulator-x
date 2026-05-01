@@ -1,32 +1,37 @@
-//! Phase 11.2.C parity test: GPU vs CPU full 38-species biochem
-//! after 1 s of simulated time.
+//! Phase 11.2.D parity test: GPU vs CPU full 38-species biochem +
+//! post-RK4 hemoglobin Adair update + pH buffer, after 1 s of simulated time.
 //!
-//! Builds an identical pool, runs the full kernel on both backends for 1000
-//! RK4 ms-steps, and asserts per-species relative error < 1% (or absolute
-//! < 1e-3 mM for sub-millimolar species). The CPU reference mirrors the GPU
-//! `derivatives` function exactly: glycolysis + 2,3-BPG shunt + PPP +
-//! glutathione + Piezo1 + Na/K-ATPase + leaks + GLUT1 + MCT1 + external ATP
-//! demand. NO inline homeostasis hacks (deferred to 11.2.E), NO Hb / pH
-//! (deferred to 11.2.D).
+//! Builds an identical pool, runs the kernel on both backends for 1000 RK4
+//! ms-steps with the post-RK4 Hb update interleaved per step, then asserts
+//! per-species relative error < 1% (or absolute < 1e-3 mM for sub-millimolar
+//! species) AND hemoglobin saturation matches within 1% absolute. The CPU
+//! reference mirrors the GPU `derivatives` + `hb_post_step` exactly.
 //!
 //! Skipped if no GPU adapter is available.
 
 use cell_simulator_x::biochemistry::{
-    GlutathioneCycle, GlycolysisSolver, IonHomeostasisSystem, MetaboliteIndices, MetabolitePool,
-    PentosePhosphatePathway, Piezo1System, RapoportLueberingSolver,
+    GlutathioneCycle, GlycolysisSolver, HemoglobinSolver, HemoglobinState, IonHomeostasisSystem,
+    MetaboliteIndices, MetabolitePool, PentosePhosphatePathway, PhBufferModel, Piezo1System,
+    RapoportLueberingSolver, STANDARD_PCO2_MMHG, STANDARD_TEMPERATURE_K,
 };
-use cell_simulator_x::compute::{run_full_biochem_batch, ComputeContext, FullBiochemBatchConfig};
+use cell_simulator_x::compute::{
+    run_full_biochem_batch_with_hb, ComputeContext, FullBiochemBatchConfig,
+};
 use cell_simulator_x::FullyIntegratedIndices;
 
 const DURATION_SEC: f64 = 1.0;
 const DT_SEC: f64 = 0.001;
 const MEMBRANE_TENSION: f64 = 0.5;
+const PO2_MMHG: f64 = 100.0;
+const INITIAL_HB_SAT: f64 = 0.75;
 
-/// CPU reference: full biochem RK4 mirroring the GPU kernel scope exactly.
-/// Glycolysis + 2,3-BPG shunt + PPP + glutathione + Piezo1 + ion homeostasis +
-/// GLUT1 + MCT1 + external ATP demand. No Hb, no pH, no inline homeostasis hacks.
+/// CPU reference: full 38-species biochem RK4 + post-RK4 Hb update each step.
 #[allow(non_snake_case)]
-fn run_cpu_full_biochem(pool: &mut MetabolitePool, duration_sec: f64) {
+fn run_cpu_full_biochem_with_hb(
+    pool: &mut MetabolitePool,
+    hb_state: &mut HemoglobinState,
+    duration_sec: f64,
+) {
     let full = FullyIntegratedIndices::new();
     let glyco = GlycolysisSolver::new();
     let shunt = RapoportLueberingSolver::new(&full.glycolysis, full.bisphosphoglycerate_2_3);
@@ -35,6 +40,8 @@ fn run_cpu_full_biochem(pool: &mut MetabolitePool, duration_sec: f64) {
     glutathione.h2o2_production_rate_mM_per_sec = 0.005;
     let piezo1 = Piezo1System::new(&full.redox);
     let ion_homeo = IonHomeostasisSystem::new(&full.glycolysis, &full.redox, 35);
+    let hb_solver = HemoglobinSolver::default();
+    let ph_buffer = PhBufferModel::default();
 
     let external_glucose_mM = 5.0;
     let atp_consumption_mM_per_sec = 0.001;
@@ -66,13 +73,10 @@ fn run_cpu_full_biochem(pool: &mut MetabolitePool, duration_sec: f64) {
             glutathione.compute_derivatives(&temp, dydt);
             piezo1.compute_derivatives(&temp, MEMBRANE_TENSION, dydt);
             ion_homeo.compute_derivatives(&temp, dydt);
-            // External ATP consumption.
             dydt[indices.atp] -= atp_consumption_mM_per_sec;
             dydt[indices.adp] += atp_consumption_mM_per_sec;
-            // GLUT1 transport.
             let glc = state[indices.glucose];
             dydt[indices.glucose] += 0.5 * (external_glucose_mM - glc);
-            // MCT1 lactate export.
             let lac = state[indices.lactate];
             if lac > 1.0 {
                 dydt[indices.lactate] -= 0.1 * (lac - 1.0);
@@ -96,6 +100,13 @@ fn run_cpu_full_biochem(pool: &mut MetabolitePool, duration_sec: f64) {
                 y[i] = min_concentration_mM;
             }
         }
+
+        // Post-RK4: pH from lactate, then Hb step.
+        let lactate = pool.get(indices.lactate);
+        let ph = ph_buffer.calculate_ph(lactate);
+        let dpg = pool.get(full.bisphosphoglycerate_2_3);
+        let conditions = (ph, dpg, STANDARD_TEMPERATURE_K, STANDARD_PCO2_MMHG);
+        hb_solver.step(hb_state, PO2_MMHG, conditions, dt);
     }
 }
 
@@ -148,7 +159,7 @@ fn species_label(idx: usize) -> &'static str {
 }
 
 #[test]
-fn full_biochem_cpu_gpu_parity_one_second() {
+fn full_biochem_with_hb_cpu_gpu_parity_one_second() {
     let ctx = match ComputeContext::new_headless_blocking() {
         Ok(c) => c,
         Err(e) => {
@@ -159,29 +170,29 @@ fn full_biochem_cpu_gpu_parity_one_second() {
 
     // === CPU run ===
     let mut cpu_pool = build_pool();
-    run_cpu_full_biochem(&mut cpu_pool, DURATION_SEC);
+    let mut cpu_hb = HemoglobinState::at_saturation(INITIAL_HB_SAT, 5.0);
+    run_cpu_full_biochem_with_hb(&mut cpu_pool, &mut cpu_hb, DURATION_SEC);
 
     // === GPU run ===
-    let gpu_pool = build_pool();
-    let mut pools = vec![gpu_pool.clone()];
+    let mut pools = vec![build_pool()];
+    let mut hb_sats = vec![INITIAL_HB_SAT];
     let config = FullBiochemBatchConfig {
         dt_sec: DT_SEC,
         n_steps: (DURATION_SEC / DT_SEC).ceil() as u32,
         membrane_tension_pN_per_nm: MEMBRANE_TENSION,
-        enable_hb: false,
+        po2_mmHg: PO2_MMHG,
         ..FullBiochemBatchConfig::default()
     };
-    run_full_biochem_batch(&ctx, &mut pools, &config).expect("GPU dispatch");
+    run_full_biochem_batch_with_hb(&ctx, &mut pools, &mut hb_sats, &config)
+        .expect("GPU dispatch");
     let gpu_pool = pools.into_iter().next().unwrap();
+    let gpu_hb_sat = hb_sats[0];
 
-    // === Compare ===
+    // === Compare metabolites ===
     let mut max_rel_err = 0.0f64;
-    let mut max_rel_err_species = 0usize;
+    let mut max_rel_err_species: i32 = -1;
     let mut failures = Vec::new();
-    println!(
-        "\n  {:<11} {:>14} {:>14} {:>10}",
-        "species", "cpu", "gpu", "rel-err"
-    );
+    println!("\n  {:<11} {:>14} {:>14} {:>10}", "species", "cpu", "gpu", "rel-err");
     for idx in 0..38 {
         let cpu_v = cpu_pool.get(idx);
         let gpu_v = gpu_pool.get(idx);
@@ -191,15 +202,11 @@ fn full_biochem_cpu_gpu_parity_one_second() {
             (cpu_v - gpu_v).abs()
         };
         let label = species_label(idx);
-        println!(
-            "  {:<11} {:>14.6} {:>14.6} {:>10.4}",
-            label, cpu_v, gpu_v, rel_err
-        );
+        println!("  {:<11} {:>14.6} {:>14.6} {:>10.4}", label, cpu_v, gpu_v, rel_err);
         if rel_err > max_rel_err {
             max_rel_err = rel_err;
-            max_rel_err_species = idx;
+            max_rel_err_species = idx as i32;
         }
-        // Tolerance: 1% relative for species above 1e-3, 1e-3 absolute below.
         let pass = if cpu_v.abs() < 1e-3 {
             (cpu_v - gpu_v).abs() < 1e-3
         } else {
@@ -210,16 +217,36 @@ fn full_biochem_cpu_gpu_parity_one_second() {
         }
     }
 
+    // === Compare Hb saturation ===
+    let hb_diff = (cpu_hb.saturation - gpu_hb_sat).abs();
     println!(
-        "\nWorst-fit: {} (rel-err = {:.4}%)",
-        species_label(max_rel_err_species),
-        max_rel_err * 100.0
+        "\n  Hb sat      cpu = {:.6}  gpu = {:.6}  abs diff = {:.6}",
+        cpu_hb.saturation, gpu_hb_sat, hb_diff
     );
+
+    let species_msg = if max_rel_err_species < 0 {
+        "(none)".to_string()
+    } else {
+        format!(
+            "{} (rel-err = {:.4}%)",
+            species_label(max_rel_err_species as usize),
+            max_rel_err * 100.0
+        )
+    };
+    println!("\nWorst-fit metabolite: {}", species_msg);
 
     assert!(
         failures.is_empty(),
-        "GPU/CPU full biochem parity failures (>{}% rel-err): {:?}",
+        "GPU/CPU full biochem + Hb parity failures (>{}% rel-err): {:?}",
         1.0,
         failures
+    );
+
+    assert!(
+        hb_diff < 0.01,
+        "Hb saturation diverged: cpu = {:.6}, gpu = {:.6}, abs diff = {:.6}",
+        cpu_hb.saturation,
+        gpu_hb_sat,
+        hb_diff
     );
 }
