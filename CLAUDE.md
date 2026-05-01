@@ -66,6 +66,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 11.2.B: 2,3-BPG Shunt on GPU ✅ (BPGM + BPGP added → full 18-species `MetabolismSolver` parity; 0.0009% worst-fit rel-err on 2,3-BPG)
 - Phase 11.2.C: PPP + Glutathione + Piezo1 + Ions on GPU ✅ (full 38-species kernel: 22 rate functions; 0.0023% worst-fit rel-err on Na⁺ after 1s; see `docs/phase_11_2_c_notes.md`)
 - Phase 11.2.D: Hemoglobin Adair + pH Buffer on GPU ✅ (post-RK4 Euler interleaved per ms; Hb saturation parity 2e-6 absolute after 1s; see `docs/phase_11_2_d_notes.md`)
+- Phase 11.2.E: Inline homeostasis corrections + full-solver parity ✅ (basal NADPH, basal GSH, ATP regen; GPU kernel matches `FullyIntegratedSolver::step` to 0.0023% per species; see `docs/phase_11_2_e_notes.md`)
 
 ## Development
 

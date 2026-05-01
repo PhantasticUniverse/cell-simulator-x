@@ -352,9 +352,9 @@ struct FullBiochemUniforms {
     adair_k2: f32,
     adair_k3: f32,
     adair_k4: f32,
+    enable_homeostasis_corrections: u32,
     _pad0: f32,
     _pad1: f32,
-    _pad2: f32,
 }
 
 /// Configuration for one full biochem batch dispatch.
@@ -450,6 +450,15 @@ pub struct FullBiochemBatchConfig {
     pub adair_k3_per_mmHg: f64,
     /// Base Adair K₄ (mmHg⁻¹).
     pub adair_k4_per_mmHg: f64,
+
+    // === Phase 11.2.E: inline homeostasis corrections ===
+
+    /// Enable the three inline homeostasis correction terms (basal NADPH
+    /// consumption, basal GSH oxidation, ATP-deficit regen). Defaults to
+    /// `false` so the 11.2.C and 11.2.D parity tests remain bit-stable;
+    /// callers running the full `FullyIntegratedSolver` equivalent should
+    /// set this to `true` for parity with `full_integration.rs::step`.
+    pub enable_homeostasis_corrections: bool,
 }
 
 impl Default for FullBiochemBatchConfig {
@@ -498,6 +507,7 @@ impl Default for FullBiochemBatchConfig {
             adair_k2_per_mmHg: adair.k2_per_mmHg,
             adair_k3_per_mmHg: adair.k3_per_mmHg,
             adair_k4_per_mmHg: adair.k4_per_mmHg,
+            enable_homeostasis_corrections: false,
         }
     }
 }
@@ -678,9 +688,9 @@ fn run_full_biochem_internal(
         adair_k2: config.adair_k2_per_mmHg as f32,
         adair_k3: config.adair_k3_per_mmHg as f32,
         adair_k4: config.adair_k4_per_mmHg as f32,
+        enable_homeostasis_corrections: u32::from(config.enable_homeostasis_corrections),
         _pad0: 0.0,
         _pad1: 0.0,
-        _pad2: 0.0,
     };
     let buf_u = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("full biochem uniforms"),

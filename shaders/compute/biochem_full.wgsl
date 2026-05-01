@@ -131,9 +131,10 @@ struct U {
     adair_k2: f32,
     adair_k3: f32,
     adair_k4: f32,
+    // Phase 11.2.E: enable the three inline homeostasis correction terms.
+    enable_homeostasis_corrections: u32,
     _pad0: f32,
     _pad1: f32,
-    _pad2: f32,
 }
 
 @group(0) @binding(0) var<storage, read_write> state: array<f32>;
@@ -659,6 +660,34 @@ fn derivatives(y: ptr<function, array<f32, 38>>, dydt: ptr<function, array<f32, 
         (*dydt)[NA] = (*dydt)[NA] + na_leak;
         let k_leak = u.g_k_per_sec * (k_ion - u.k_external_mM);
         (*dydt)[K_ION] = (*dydt)[K_ION] - k_leak;
+    }
+
+    // === Inline homeostasis corrections (Phase 11.2.E) ===
+    //
+    // Three pure-functional terms that the CPU `FullyIntegratedSolver::step`
+    // applies inside its derivative closure. Without them the steady state
+    // drifts (NADPH/NADP⁺ ratio runs up, GSH/GSSG ratio runs up, ATP slowly
+    // drains under the membrane-pump load). These are documented as
+    // parameter-identifiability gaps in the Phase 10 validation report —
+    // they're carried forward verbatim onto the GPU for parity with CPU.
+    if (u.enable_homeostasis_corrections != 0u) {
+        // Basal NADPH consumption: methemoglobin reductase, thioredoxin, etc.
+        let ratio = select(100.0, nadph / nadp, nadp > 1e-6);
+        let basal_nadph = 0.0003 * nadph / (0.05 + nadph) * (1.0 + 0.01 * min(ratio, 30.0));
+        (*dydt)[NADPH] = (*dydt)[NADPH] - basal_nadph;
+        (*dydt)[NADP]  = (*dydt)[NADP]  + basal_nadph;
+
+        // Basal GSH oxidation (non-enzymatic, protein-S-glutathionylation).
+        let gsh_ratio = select(1000.0, gsh / gssg, gssg > 1e-9);
+        let basal_gsh = 0.001 * gsh / (0.5 + gsh) * min(gsh_ratio / 400.0, 5.0);
+        (*dydt)[GSH]  = (*dydt)[GSH]  - 2.0 * basal_gsh;
+        (*dydt)[GSSG] = (*dydt)[GSSG] + basal_gsh;
+
+        // ATP-deficit regen toward 1.8 mM (mass-action on ADP).
+        let atp_deficit = max(1.8 - atp, 0.0);
+        let atp_regen = 0.2 * atp_deficit * adp / (0.5 + adp);
+        (*dydt)[ATP] = (*dydt)[ATP] + atp_regen;
+        (*dydt)[ADP] = (*dydt)[ADP] - atp_regen;
     }
 
     // === World-level dynamics (external ATP demand, GLUT1, MCT1) ===
