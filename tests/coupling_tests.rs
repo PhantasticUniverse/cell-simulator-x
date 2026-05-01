@@ -4,6 +4,11 @@
 //! - Forward coupling: Tension → Piezo1 → Ca²⁺ → ATP release
 //! - Reverse coupling: ATP → spectrin stiffness
 //! - Timestep synchronization between physics and biochemistry
+//!
+//! Phase 11.5 marks `CoupledSolver` `#[deprecated]`; these tests stay to
+//! guard the legacy code path until Phase 12 removes it.
+
+#![allow(deprecated)]
 
 use cell_simulator_x::{
     CoupledSolver, CoupledConfig, SpectrinModulator, TensionComputer,

@@ -70,6 +70,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 11.3.A–D: Skalak + WLC + DPD + Velocity-Verlet on GPU ✅ (per-element/per-edge force kernels with CSR aggregation; stateless PCG-hash RNG for DPD; CPU/GPU parity from 0 absolute (Verlet) to 0.0127% relative (Skalak); see `docs/phase_11_3_notes.md`)
 - Phase 11.3.E: Integrated `PhysicsBackend` ✅ (persistent buffers + 6-dispatch single-pass step; WLC pre-baked as static baseline; CPU/GPU parity 1.9e-15 μm position drift after 10 substeps; see `docs/phase_11_3_notes.md`)
 - Phase 11.4: Render-Compute device sharing ✅ (RenderState exposes `Arc<Device>`/`Arc<Queue>`; `ComputeContext::from_shared` borrows; vertex-shader binding deferred; see `docs/phase_11_4_notes.md`)
+- Phase 11.5: Backend switch + CoupledSolver deprecation ✅ (`WORLD_BACKEND` env var; `Backend` enum; `#[deprecated]` on CoupledSolver/CoupledConfig; wgpu-profiler deferred; see `docs/phase_11_5_notes.md`)
 
 ## Development
 

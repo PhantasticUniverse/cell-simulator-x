@@ -11,6 +11,12 @@
 //! Refactoring CoupledSolver to internally delegate to `Cell` is a
 //! Phase 10.5 follow-on; for the moment both code paths exist and stay
 //! in sync.
+//!
+//! Phase 11.5 marks `CoupledSolver` `#[deprecated]`; this module still
+//! references `CoupledConfig` for parity, so internal uses are silenced
+//! here. External consumers continue to see the deprecation warning.
+
+#![allow(deprecated)]
 
 use glam::Vec3;
 

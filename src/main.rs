@@ -1,5 +1,9 @@
 // Allow non-snake-case for unit suffixes in field names (mM, mmHg, K, etc.)
 #![allow(non_snake_case)]
+// CoupledSolver / CoupledConfig are #[deprecated] (Phase 11.5) but the
+// CLI's --diagnose-coupled and --diagnose-multi-cell modes still use
+// them until Phase 12.
+#![allow(deprecated)]
 
 //! Cell Simulator X - Entry point
 //!
@@ -974,6 +978,7 @@ fn run_disease_diagnostics(
 }
 
 /// Run mechano-metabolic coupling diagnostics without GUI
+#[allow(deprecated)] // CoupledSolver is slated for Phase 12 removal; see docs/phase_11_5_notes.md
 fn run_coupled_diagnostics(
     duration_sec: f64,
     tension_override: f64,

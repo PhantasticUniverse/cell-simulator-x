@@ -122,6 +122,11 @@ pub use biochemistry::{
 };
 pub use config::Parameters;
 // Phase 8: Mechano-Metabolic Coupling
+// CoupledSolver / CoupledConfig / CoupledDiagnostics are deprecated in
+// Phase 11.5 (slated for Phase 12 removal). The re-export stays so
+// external callers and `--diagnose-coupled` keep working; consumers of
+// the deprecated symbols see the warning at their use sites.
+#[allow(deprecated)]
 pub use coupling::{CoupledSolver, CoupledConfig, CoupledDiagnostics, TensionComputer, SpectrinModulator};
 // Export module
 pub use export::{CsvExporter, TimeSeriesRecord, export_state_json, save_screenshot};

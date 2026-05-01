@@ -4,6 +4,11 @@
 //! - `World::step` runs N=1, N=10, N=100 cells on CPU.
 //! - All Phase 10 validation tests still pass at N=1.
 //! - Per-cell results stay consistent across N (no aliasing between cells).
+//!
+//! `CoupledConfig` is `#[deprecated]` as of Phase 11.5 but `World` still
+//! accepts it as the configuration type until Phase 12.
+
+#![allow(deprecated)]
 
 use cell_simulator_x::config::{GeometryParameters, Parameters};
 use cell_simulator_x::coupling::CoupledConfig;

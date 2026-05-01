@@ -20,6 +20,15 @@
 //!     solver.step(&mut mesh, &spectrin, &mut physics_state, &mut metabolites);
 //! }
 //! ```
+//!
+//! ## Deprecation (Phase 11.5)
+//!
+//! This entire module is `#[deprecated]` (Phase 11.5) and scheduled for
+//! removal in Phase 12. Internal uses of `CoupledSolver` / `CoupledConfig`
+//! within this file are wrapped with `#[allow(deprecated)]` so build
+//! output stays quiet here while consumer-side warnings remain.
+
+#![allow(deprecated)]
 
 use crate::biochemistry::{FullyIntegratedSolver, FullyIntegratedConfig, MetabolitePool};
 use crate::geometry::{Mesh, SpectrinNetwork};
@@ -30,6 +39,15 @@ use super::spectrin_modulator::SpectrinModulator;
 use super::tension_computer::TensionComputer;
 
 /// Configuration for the coupled solver.
+///
+/// **Deprecation (Phase 11.5):** `CoupledSolver` and its config are
+/// scheduled for removal in Phase 12. New code should use `World` /
+/// `Cell` (Phase 10.5) plus a `compute::PhysicsBackend` (Phase 11.3.E)
+/// for the physics half. See `docs/phase_11_5_notes.md`.
+#[deprecated(
+    since = "1.1.0",
+    note = "use `World` + `compute::PhysicsBackend` instead; scheduled for removal in Phase 12"
+)]
 #[derive(Debug, Clone)]
 pub struct CoupledConfig {
     /// Physics timestep (seconds). Default: 1e-6 (1 μs)
@@ -69,6 +87,14 @@ impl Default for CoupledConfig {
 ///
 /// Orchestrates synchronized physics and biochemistry simulations
 /// with bidirectional coupling.
+///
+/// **Deprecation (Phase 11.5):** scheduled for removal in Phase 12 once
+/// the multi-cell `World` integrates with `PhysicsBackend`. See
+/// `docs/phase_11_5_notes.md` for migration guidance.
+#[deprecated(
+    since = "1.1.0",
+    note = "use `World` + `compute::PhysicsBackend` instead; scheduled for removal in Phase 12"
+)]
 pub struct CoupledSolver {
     /// Physics solver for membrane mechanics
     pub physics: PhysicsSolver,
@@ -92,6 +118,7 @@ pub struct CoupledSolver {
     current_tension_pN_per_nm: f64,
 }
 
+#[allow(deprecated)]
 impl CoupledSolver {
     /// Create a new coupled solver.
     ///

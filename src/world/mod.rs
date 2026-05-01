@@ -5,6 +5,8 @@
 //! [`crate::coupling::CoupledSolver`] continues to work unchanged for
 //! existing callers; new code targeting Phase 11+ GPU compute should prefer
 //! `World`.
+
+#![allow(deprecated)]
 //!
 //! ## Why a separate type
 //!
@@ -34,8 +36,10 @@ use crate::config::Parameters;
 use crate::coupling::{CoupledConfig, SpectrinModulator};
 
 mod cell;
+pub mod backend;
 
 pub use cell::Cell;
+pub use backend::{env_default as backend_from_env, Backend};
 
 /// Opaque handle to a cell inside a [`World`].
 ///
