@@ -87,6 +87,12 @@ pub mod physics;
 pub mod render;
 pub mod state;
 
+// Phase 10: Empirical validation against published reference curves.
+// Gated behind the `validation` feature so production builds and the GUI
+// pipeline don't compile the validation harness.
+#[cfg(feature = "validation")]
+pub mod validation;
+
 pub use biochemistry::{
     MetabolismSolver, MetabolismConfig, MetabolitePool, MetabolismDiagnostics,
     ExtendedMetaboliteIndices, MetaboliteIndices,

@@ -290,9 +290,15 @@ pub struct Phosphofructokinase {
 impl Phosphofructokinase {
     pub fn new(indices: &MetaboliteIndices) -> Self {
         Self {
-            // Increased Vmax to support flux through lower glycolysis
-            vmax_mM_per_sec: 0.4,
-            k_half_f6p_mM: 0.15,
+            // RBC PFK kinetics: Hill cooperativity for F6P, MM for ATP.
+            // Reference: Rapoport 1976; BRENDA k_half_F6P range 0.04–0.25 mM.
+            // Phase 10 refit: lowered k_half_F6P 0.15 → 0.04 mM (high-affinity
+            // end of literature range, consistent with the activated-PFK state
+            // in well-fed RBCs). The previous 0.15 mM placed steady-state F6P
+            // (~0.013 mM) far below half-activation, throttling the whole
+            // pathway and forcing the in-line ATP regen hack to compensate.
+            vmax_mM_per_sec: 0.2,
+            k_half_f6p_mM: 0.04,
             km_atp_mM: 0.1,
             hill_coefficient: 2.5,
             stoichiometry: ReactionStoichiometry::new(
@@ -346,7 +352,14 @@ impl Aldolase {
         Self {
             vmax_f_mM_per_sec: 0.3,
             km_fbp_mM: 0.01,
-            keq_mM: 7.8e-5,  // Equilibrium constant in mM
+            // Phase 10 unit-error fix: previously 7.8e-5 mM, which is
+            // 1000× too small. Literature Keq ≈ 7.8 × 10⁻⁵ **M** = 7.8 × 10⁻²
+            // mM (Veech 1969; Mulquiney 1999 Table 2). With the prior value
+            // aldolase drove F1,6BP backwards under physiological [DHAP][GAP],
+            // stalling glycolysis and forcing a phenomenological ATP regen
+            // hack to compensate. With the correct value, [DHAP][GAP]/[FBP] ≈
+            // 0.1 mM at Mulquiney targets matches Keq.
+            keq_mM: 7.8e-2,
             stoichiometry: ReactionStoichiometry::new(
                 vec![(indices.fructose_1_6_bisphosphate, 1.0)],
                 vec![

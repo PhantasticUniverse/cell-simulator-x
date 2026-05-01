@@ -249,40 +249,41 @@ impl FullyIntegratedSolver {
             }
 
             // === Basal NADPH consumption (methemoglobin reductase, thioredoxin, etc.) ===
-            // Reference: ~0.5-1% of Hb converts to metHb/hour, requiring continuous NADPH
-            // Includes cytochrome b5 reductase, thioredoxin reductase, and other oxidoreductases
-            // Tuned to achieve NADPH/NADP+ ratio of 10-20 at steady state
+            // Reference: ~0.5–1% of Hb converts to metHb/hour, requiring continuous NADPH
+            // (cytochrome b5 reductase, thioredoxin reductase, other oxidoreductases).
+            // Coefficient retained at 0.0003 because it acts as a brake on PPP — lowering
+            // it raises NADPH but releases inhibition on G6PDH, which pushes PPP fraction
+            // back above the 5–15% target. This is a parameter-identifiability finding
+            // (Phase 10 validation report): NADPH/NADP+ ratio and PPP fraction are
+            // jointly non-identifiable from steady-state data alone.
             let nadph = state[indices.redox.nadph];
             let nadp = state[indices.redox.nadp_plus];
-            // Tuned to maintain NADPH/NADP+ ratio 10-20 at steady state
-            // Low basal rate since glutathione reductase is the main NADPH consumer
             let ratio = if nadp > 1e-6 { nadph / nadp } else { 100.0 };
             let basal_nadph_consumption = 0.0003 * nadph / (0.05 + nadph) * (1.0 + 0.01 * ratio.min(30.0));
             dydt[indices.redox.nadph] -= basal_nadph_consumption;
             dydt[indices.redox.nadp_plus] += basal_nadph_consumption;
 
             // === Basal GSH oxidation (non-enzymatic, protein-S-glutathionylation, etc.) ===
-            // Maintains physiological GSH/GSSG ratio of 100-400
-            // Reference: Spontaneous oxidation and protein modification reactions
+            // Maintains physiological GSH/GSSG ratio of 100-400.
+            // Reference: spontaneous oxidation + protein modification.
             let gsh = state[indices.redox.gsh];
             let gssg_current = state[indices.redox.gssg];
             let gsh_gssg_ratio = if gssg_current > 1e-9 { gsh / gssg_current } else { 1000.0 };
-            // GSH/GSSG-dependent oxidation rate
             let basal_gsh_oxidation = 0.001 * gsh / (0.5 + gsh) * (gsh_gssg_ratio / 400.0).min(5.0);
             dydt[indices.redox.gsh] -= 2.0 * basal_gsh_oxidation;
             dydt[indices.redox.gssg] += basal_gsh_oxidation;
 
             // === ATP homeostasis correction ===
-            // Compensates for structural ATP deficit in the model
-            // The model's PPP fraction (~40-50%) exceeds physiological levels (~5-15%),
-            // causing insufficient ATP production from glycolysis.
-            // This term represents unmodeled ATP-sparing mechanisms and
-            // helps maintain ATP at physiological levels (1.5-2.5 mM).
+            // Phase 10 finding: with the aldolase Keq fix and PFK k_half retuning,
+            // glycolysis produces ATP at near-physiological rates, but this term
+            // remains load-bearing because the Phase 10 refit traded PPP-fraction
+            // identifiability for NADPH-ratio identifiability. Coefficient kept
+            // at 0.2 to keep PPP fraction below 15% (canary). Full removal of
+            // this hack is a Phase 11 task once the multi-cell architecture
+            // refactor settles transient ATP dynamics.
             let atp = state[indices.glycolysis.atp];
             let adp = state[indices.glycolysis.adp];
-            // Regenerate ATP when it drops below target, stronger effect at low ATP
-            let atp_deficit = (1.8 - atp).max(0.0);  // Target ~1.8 mM
-            // Increased coefficient from 0.08 to 0.2 for better ATP maintenance
+            let atp_deficit = (1.8 - atp).max(0.0);
             let atp_regen = 0.2 * atp_deficit * adp / (0.5 + adp);
             dydt[indices.glycolysis.atp] += atp_regen;
             dydt[indices.glycolysis.adp] -= atp_regen;

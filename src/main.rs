@@ -208,6 +208,9 @@ struct CliArgs {
     diagnose_coupled: bool,
     diagnose_disease: Option<String>,
     disease_param: f64,
+    /// Phase 10: empirical validation against published reference curves.
+    /// Only available with the `validation` Cargo feature.
+    validate: bool,
     steps: usize,
     force: f32,
     duration_sec: f64,
@@ -239,6 +242,7 @@ impl Default for CliArgs {
             diagnose_coupled: false,
             diagnose_disease: None,
             disease_param: 0.0,
+            validate: false,
             steps: 1000,
             force: 5.0,
             duration_sec: 60.0,  // 60 seconds default for metabolism
@@ -271,6 +275,7 @@ fn parse_args() -> CliArgs {
             "--diagnose-redox" => cli.diagnose_redox = true,
             "--diagnose-full" => cli.diagnose_full = true,
             "--diagnose-coupled" => cli.diagnose_coupled = true,
+            "--validate" => cli.validate = true,
             "--diagnose-disease" => {
                 i += 1;
                 if i < args.len() {
@@ -374,6 +379,7 @@ fn parse_args() -> CliArgs {
                 println!("  --diagnose-redox       Run redox/antioxidant diagnostics (no GUI)");
                 println!("  --diagnose-full        Run fully integrated diagnostics (glycolysis+PPP+Hb) (no GUI)");
                 println!("  --diagnose-coupled     Run mechano-metabolic coupling diagnostics (no GUI)");
+                println!("  --validate             Phase 10: empirical validation suite (requires --features validation)");
                 println!("  --diagnose-disease D   Run disease model diagnostics (storage|diabetic|malaria|sickle)");
                 println!("  -n, --steps N          Number of physics steps (default: 1000)");
                 println!("  -f, --force F          Force magnitude in μN (default: 5.0)");
@@ -1100,6 +1106,38 @@ fn run_coupled_diagnostics(
     Ok(())
 }
 
+/// Phase 10: run the empirical validation suite.
+///
+/// Available only when the `validation` Cargo feature is enabled. Without
+/// it, the binary prints a helpful message rather than failing silently.
+#[cfg(feature = "validation")]
+fn run_validation() -> Result<()> {
+    println!("=== Cell Simulator X — Phase 10 Validation ===\n");
+    let report = cell_simulator_x::validation::run_full_suite();
+    report.print_summary();
+
+    let path = format!("target/validation/{}.json", report.commit_sha);
+    report.write_json(&path).map_err(anyhow::Error::from)?;
+    println!("\nFull report written to {}", path);
+
+    if report.all_passed() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "{} of {} experiments failed (see notes above)",
+            report.total_count - report.passed_count,
+            report.total_count
+        ))
+    }
+}
+
+#[cfg(not(feature = "validation"))]
+fn run_validation() -> Result<()> {
+    eprintln!("--validate requires the `validation` Cargo feature.");
+    eprintln!("Re-run with: cargo run --features validation -- --validate");
+    std::process::exit(2);
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -1154,6 +1192,10 @@ fn main() -> Result<()> {
             cli.po2_mmHg,
             cli.oxidative_stress,
         );
+    }
+
+    if cli.validate {
+        return run_validation();
     }
 
     log::info!("Cell Simulator X starting...");

@@ -19,6 +19,8 @@ cargo run -- --diagnose-disease malaria --disease-param 0.05  # Malaria (5% para
 cargo run -- --diagnose-disease sickle --disease-param 1.0    # Sickle cell (HbSS)
 cargo run -- --diagnose-coupled -d 60                          # Mechano-metabolic coupling
 cargo run -- --diagnose-coupled --tension 2.0 -d 60            # With tension override
+cargo run --features validation -- --validate                  # Phase 10 empirical validation suite
+cargo test --features validation --test validation_suite       # Validation tests
 cargo run -- --help                  # Full CLI options
 ```
 
@@ -39,6 +41,7 @@ cargo run -- --help                  # Full CLI options
 | `coupling` | Mechano-metabolic coupling: TensionComputer, SpectrinModulator, CoupledSolver |
 | `render/hud` | egui-based HUD overlay: panels, widgets, theme |
 | `export` | Screenshot, CSV time-series, JSON state export |
+| `validation` | (feature `validation`) Empirical fits vs Imai 1981, Mulquiney 1999, Rief 1999, Waugh-Evans 1979, Dao 2003 |
 
 ## Current Status
 
@@ -52,6 +55,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 7: Disease Models ✅ (Storage Lesion, Diabetic, Malaria, Sickle Cell)
 - Phase 8: Mechano-Metabolic Coupling ✅ (TensionComputer, SpectrinModulator, CoupledSolver)
 - Phase 9: GUI HUD & Export ✅ (Real-time metabolite display, JSON/CSV export)
+- Phase 10: Empirical Validation Foundation ✅ (Imai/Mulquiney/Rief/Waugh-Evans/Dao; aldolase Keq bug fix; PPP refit; see `docs/validation_report_v1.md`)
 
 ## Development
 

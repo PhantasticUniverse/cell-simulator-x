@@ -131,11 +131,17 @@ pub struct GlutathioneReductase {
 impl GlutathioneReductase {
     pub fn new(indices: &RedoxIndices) -> Self {
         Self {
-            // Reference: Worthington 1976, Beutler 1984
-            // RBC GR activity: ~15 U/g Hb = ~0.085 mM/s at 340 g/L Hb
-            // Km_GSSG adjusted to allow GSSG accumulation to physiological levels
-            vmax_mM_per_sec: 0.15,
-            km_gssg_mM: 0.015,  // Allows GSSG to accumulate for GSH/GSSG ~200
+            // Reference: Worthington 1976, Beutler 1984.
+            // Tissue activity 15 U/g Hb ≈ 0.085 mM/s, but in vivo the enzyme
+            // operates at <10% saturation (Mulquiney 1999, Table 6). Phase 10
+            // refit: lowered Vmax 0.15 → 0.025 mM/s so that GR demand on
+            // NADPH does not exceed physiological PPP supply (~0.003 mM/s).
+            // With Vmax 0.15 the model crashed NADPH/NADP+ to ~0; with 0.025
+            // the steady-state ratio sits in the 5–10 range, leaving the
+            // canonical 10–20 reachable once the basal NADPH-consumption hack
+            // in full_integration.rs is removed (Phase 11).
+            vmax_mM_per_sec: 0.025,
+            km_gssg_mM: 0.015,
             km_nadph_mM: 0.015,
             stoichiometry: ReactionStoichiometry::new(
                 vec![

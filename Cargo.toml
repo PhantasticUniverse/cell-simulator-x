@@ -45,12 +45,23 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 csv = "1.3"
 chrono = { version = "0.4", features = ["clock"] }
 
+[features]
+default = []
+# Phase 10: Empirical validation against published reference curves.
+# Gates the slow validation suite — `cargo test --features validation`.
+validation = []
+
 [dev-dependencies]
 criterion = "0.5"
 
 [[bench]]
 name = "geometry"
 harness = false
+
+[[test]]
+name = "validation_suite"
+path = "tests/validation_suite.rs"
+required-features = ["validation"]
 
 [profile.release]
 lto = true
