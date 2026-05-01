@@ -47,6 +47,7 @@ cargo run -- --help                  # Full CLI options
 | `world` | Multi-cell `World` + `Cell` + `CellHandle` (Phase 10.5); rayon-parallel per-cell stepping |
 | `compute` | GPU compute scaffolding (Phase 11.0); `ComputeContext` headless wgpu, `vec_add` sentinel kernel |
 | `flow` | (Phase 12.A) Analytic external fluid: `Poiseuille` cylindrical channel + Stokes-form drag for vertex/flow coupling |
+| `storage` | (Phase 14.A) 42-day storage lesion simulator: multi-rate ms/s/day scheme, `StorageCurveSimulator` outputs metabolite trajectories matching Hess 2010 envelopes |
 
 ## Current Status
 
@@ -73,6 +74,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 11.4: Render-Compute device sharing ✅ (RenderState exposes `Arc<Device>`/`Arc<Queue>`; `ComputeContext::from_shared` borrows; vertex-shader binding deferred; see `docs/phase_11_4_notes.md`)
 - Phase 11.5: Backend switch + CoupledSolver deprecation ✅ (`WORLD_BACKEND` env var; `Backend` enum; `#[deprecated]` on CoupledSolver/CoupledConfig; wgpu-profiler deferred; see `docs/phase_11_5_notes.md`)
 - Phase 12.A: External fluid — analytic Poiseuille + drag ✅ (`flow::Poiseuille` + `apply_drag_to_external_forces`; CPU integration test shows directional cell drift under flow; `PhysicsBackend` integration + parachute/tank-treading validation deferred to 12.B/C; see `docs/phase_12_notes.md`)
+- Phase 14.A: Storage lesion at physiological timescale ✅ (multi-rate ms/s/day scheme; `StorageCurveSimulator` produces 42-day metabolite trajectory matching Hess 2010 ATP and 2,3-DPG envelopes; ion gradients trend correctly but quantitative Hess targets need Phase 14.B analytic QSS; see `docs/phase_14_notes.md`)
 
 ## Development
 

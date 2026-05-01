@@ -88,6 +88,7 @@ pub mod geometry;
 pub mod physics;
 pub mod render;
 pub mod state;
+pub mod storage;
 pub mod world;
 
 // Phase 10: Empirical validation against published reference curves.
@@ -134,6 +135,7 @@ pub use export::{CsvExporter, TimeSeriesRecord, export_state_json, save_screensh
 pub use flow::{
     apply_drag_to_external_forces, drag_force_uN, CylindricalChannel, Poiseuille,
 };
+pub use storage::{StorageCurveSimulator, StorageSample, StorageSimConfig};
 pub use geometry::{Mesh, SpectrinNetwork};
 pub use physics::{PhysicsConfig, PhysicsSolver};
 pub use render::{Camera, ExportAction, HudColors, HudOverlay, HudState, HudTheme, RenderState};
