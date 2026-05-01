@@ -11,12 +11,13 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
-use crate::geometry::Mesh;
-use crate::physics::{SkalakMaterial, SkalakSolver};
+use crate::geometry::{Mesh, SpectrinNetwork};
+use crate::physics::{SkalakMaterial, SkalakSolver, WLCParameters};
 
 use super::ComputeContext;
 
 const KERNEL_WGSL: &str = include_str!("../../shaders/compute/skalak.wgsl");
+const KERNEL_WLC_WGSL: &str = include_str!("../../shaders/compute/wlc.wgsl");
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -365,6 +366,321 @@ pub fn run_skalak_forces(
 
     let mut out = Vec::with_capacity(n_vertices);
     for i in 0..n_vertices {
+        out.push(Vec3::new(
+            result_f32[i * 3 + 0],
+            result_f32[i * 3 + 1],
+            result_f32[i * 3 + 2],
+        ));
+    }
+
+    drop(mapped);
+    buf_staging.unmap();
+
+    Ok(out)
+}
+
+// =============================================================================
+// Phase 11.3.B — WLC spectrin forces
+// =============================================================================
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct EdgeGpu {
+    node_a: u32,
+    node_b: u32,
+    contour_length_um: f32,
+    _pad: f32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct WlcUniforms {
+    n_edges: u32,
+    n_nodes: u32,
+    persistence_length_um: f32,
+    kbt_uN_um: f32,
+    max_relative_extension: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
+}
+
+/// Precomputed per-network data for WLC dispatch (analogue of
+/// `SkalakBackendData`).
+#[derive(Debug, Clone)]
+pub struct WlcBackendData {
+    /// Per-edge data uploaded to the GPU.
+    pub edges: Vec<EdgeGpuPub>,
+    /// CSR offsets indexed by node.
+    pub csr_offsets: Vec<u32>,
+    /// Packed `(edge_id << 1) | side_bit` (0 = node_a, 1 = node_b).
+    pub csr_data: Vec<u32>,
+    /// Number of nodes.
+    pub n_nodes: usize,
+    /// Number of edges.
+    pub n_edges: usize,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct EdgeGpuPub {
+    pub node_a: u32,
+    pub node_b: u32,
+    pub contour_length_um: f32,
+    pub _pad: f32,
+}
+
+impl WlcBackendData {
+    pub fn from_network(network: &SpectrinNetwork) -> Self {
+        let n_nodes = network.nodes.len();
+        let n_edges = network.edges.len();
+
+        let mut edges = Vec::with_capacity(n_edges);
+        let mut incidence: Vec<Vec<u32>> = vec![Vec::new(); n_nodes];
+
+        for (eid, e) in network.edges.iter().enumerate() {
+            edges.push(EdgeGpuPub {
+                node_a: e.node_a,
+                node_b: e.node_b,
+                contour_length_um: e.contour_length_um,
+                _pad: 0.0,
+            });
+            let eid = eid as u32;
+            incidence[e.node_a as usize].push((eid << 1) | 0);
+            incidence[e.node_b as usize].push((eid << 1) | 1);
+        }
+
+        let mut csr_offsets = Vec::with_capacity(n_nodes + 1);
+        let mut csr_data = Vec::new();
+        csr_offsets.push(0);
+        for inc in &incidence {
+            csr_data.extend_from_slice(inc);
+            csr_offsets.push(csr_data.len() as u32);
+        }
+
+        Self {
+            edges,
+            csr_offsets,
+            csr_data,
+            n_nodes,
+            n_edges,
+        }
+    }
+}
+
+/// Run WLC spectrin forces on the GPU. Returns dense per-node forces in
+/// μN. Unlike the CPU counterpart, which returns `Vec<(idx, Vec3)>` only
+/// for nodes touched by some edge, this returns a dense vector of length
+/// `network.nodes.len()` (zero for unconnected nodes).
+pub fn run_wlc_forces(
+    ctx: &ComputeContext,
+    network: &SpectrinNetwork,
+    backend: &WlcBackendData,
+    params: &WLCParameters,
+) -> Result<Vec<Vec3>> {
+    let n_nodes = backend.n_nodes;
+    let n_edges = backend.n_edges;
+    if n_nodes != network.nodes.len() {
+        anyhow::bail!(
+            "node count mismatch: backend has {}, network has {}",
+            n_nodes,
+            network.nodes.len()
+        );
+    }
+
+    // Upload node positions.
+    let mut pos_f32 = vec![0f32; n_nodes * 3];
+    for (i, n) in network.nodes.iter().enumerate() {
+        pos_f32[i * 3 + 0] = n.position[0];
+        pos_f32[i * 3 + 1] = n.position[1];
+        pos_f32[i * 3 + 2] = n.position[2];
+    }
+    let buf_pos = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("wlc node_pos"),
+        contents: bytemuck::cast_slice(&pos_f32),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+
+    let edges_pod: Vec<EdgeGpu> = backend
+        .edges
+        .iter()
+        .map(|e| EdgeGpu {
+            node_a: e.node_a,
+            node_b: e.node_b,
+            contour_length_um: e.contour_length_um,
+            _pad: 0.0,
+        })
+        .collect();
+    let buf_edges = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("wlc edges"),
+        contents: bytemuck::cast_slice(&edges_pod),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+
+    let edge_forces_bytes = (n_edges * 6 * std::mem::size_of::<f32>()) as u64;
+    let buf_edge_forces = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("wlc edge_forces"),
+        size: edge_forces_bytes.max(16),
+        usage: wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
+
+    let buf_csr_offsets = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("wlc csr_offsets"),
+        contents: bytemuck::cast_slice(&backend.csr_offsets),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let buf_csr_data = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("wlc csr_data"),
+        contents: bytemuck::cast_slice(&backend.csr_data),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+
+    let node_forces_bytes = (n_nodes * 3 * std::mem::size_of::<f32>()) as u64;
+    let buf_node_forces = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("wlc node_forces"),
+        size: node_forces_bytes,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    // kbt = 4.11 pN·nm = 4.11e-9 μN·μm.
+    let kbt_uN_um = 4.11_f32 * 1e-9;
+
+    let uniforms = WlcUniforms {
+        n_edges: n_edges as u32,
+        n_nodes: n_nodes as u32,
+        persistence_length_um: params.persistence_length_um,
+        kbt_uN_um,
+        max_relative_extension: params.max_relative_extension,
+        _pad0: 0.0,
+        _pad1: 0.0,
+        _pad2: 0.0,
+    };
+    let buf_uniforms = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("wlc uniforms"),
+        contents: bytemuck::bytes_of(&uniforms),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let buf_staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("wlc staging"),
+        size: node_forces_bytes,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let storage_entry = |binding: u32, read_only: bool| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+
+    let bgl = ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("wlc bgl"),
+        entries: &[
+            storage_entry(0, true),
+            storage_entry(1, true),
+            storage_entry(2, false),
+            storage_entry(3, true),
+            storage_entry(4, true),
+            storage_entry(5, false),
+            wgpu::BindGroupLayoutEntry {
+                binding: 6,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
+    });
+
+    let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("wlc bg"),
+        layout: &bgl,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: buf_pos.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: buf_edges.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: buf_edge_forces.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: buf_csr_offsets.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 4, resource: buf_csr_data.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 5, resource: buf_node_forces.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 6, resource: buf_uniforms.as_entire_binding() },
+        ],
+    });
+
+    let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("wlc shader"),
+        source: wgpu::ShaderSource::Wgsl(KERNEL_WLC_WGSL.into()),
+    });
+
+    let pipeline_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("wlc pl"),
+        bind_group_layouts: &[&bgl],
+        push_constant_ranges: &[],
+    });
+
+    let pipe_per_edge = ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("wlc per_edge pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: "wlc_per_edge",
+        compilation_options: Default::default(),
+    });
+    let pipe_aggregate = ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("wlc aggregate pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: "wlc_aggregate",
+        compilation_options: Default::default(),
+    });
+
+    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("wlc encoder"),
+    });
+
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("wlc pass"),
+            timestamp_writes: None,
+        });
+        pass.set_bind_group(0, &bg, &[]);
+
+        pass.set_pipeline(&pipe_per_edge);
+        let groups = ((n_edges as u32) + 63) / 64;
+        pass.dispatch_workgroups(groups.max(1), 1, 1);
+
+        pass.set_pipeline(&pipe_aggregate);
+        let groups = ((n_nodes as u32) + 63) / 64;
+        pass.dispatch_workgroups(groups.max(1), 1, 1);
+    }
+
+    encoder.copy_buffer_to_buffer(&buf_node_forces, 0, &buf_staging, 0, node_forces_bytes);
+    ctx.queue.submit(std::iter::once(encoder.finish()));
+
+    let slice = buf_staging.slice(..);
+    let (tx, rx) = mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx.send(result);
+    });
+    ctx.device.poll(wgpu::Maintain::Wait);
+    rx.recv()
+        .context("wlc: map_async channel closed")?
+        .map_err(|e| anyhow::anyhow!("wlc: map_async failed: {e:?}"))?;
+
+    let mapped = slice.get_mapped_range();
+    let result_f32: &[f32] = bytemuck::cast_slice(&mapped);
+
+    let mut out = Vec::with_capacity(n_nodes);
+    for i in 0..n_nodes {
         out.push(Vec3::new(
             result_f32[i * 3 + 0],
             result_f32[i * 3 + 1],

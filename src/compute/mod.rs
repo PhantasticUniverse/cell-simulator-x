@@ -40,7 +40,10 @@ pub use biochem::{
     FullBiochemBatchConfig, GlycolysisBatchConfig,
 };
 pub use diagnostics::{run_diagnose_gpu, vec_add_gpu};
-pub use physics::{run_skalak_forces, ElementGpuPub, SkalakBackendData};
+pub use physics::{
+    run_skalak_forces, run_wlc_forces, EdgeGpuPub, ElementGpuPub, SkalakBackendData,
+    WlcBackendData,
+};
 
 /// Headless wgpu compute context.
 ///
