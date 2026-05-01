@@ -211,6 +211,8 @@ struct CliArgs {
     /// Phase 10: empirical validation against published reference curves.
     /// Only available with the `validation` Cargo feature.
     validate: bool,
+    /// Phase 10.5: multi-cell scaling diagnostic. Number of cells to run.
+    diagnose_multi_cell: Option<usize>,
     steps: usize,
     force: f32,
     duration_sec: f64,
@@ -243,6 +245,7 @@ impl Default for CliArgs {
             diagnose_disease: None,
             disease_param: 0.0,
             validate: false,
+            diagnose_multi_cell: None,
             steps: 1000,
             force: 5.0,
             duration_sec: 60.0,  // 60 seconds default for metabolism
@@ -276,6 +279,12 @@ fn parse_args() -> CliArgs {
             "--diagnose-full" => cli.diagnose_full = true,
             "--diagnose-coupled" => cli.diagnose_coupled = true,
             "--validate" => cli.validate = true,
+            "--diagnose-multi-cell" => {
+                i += 1;
+                if i < args.len() {
+                    cli.diagnose_multi_cell = Some(args[i].parse().unwrap_or(10));
+                }
+            }
             "--diagnose-disease" => {
                 i += 1;
                 if i < args.len() {
@@ -380,6 +389,7 @@ fn parse_args() -> CliArgs {
                 println!("  --diagnose-full        Run fully integrated diagnostics (glycolysis+PPP+Hb) (no GUI)");
                 println!("  --diagnose-coupled     Run mechano-metabolic coupling diagnostics (no GUI)");
                 println!("  --validate             Phase 10: empirical validation suite (requires --features validation)");
+                println!("  --diagnose-multi-cell N  Phase 10.5: multi-cell scaling diagnostic, N cells");
                 println!("  --diagnose-disease D   Run disease model diagnostics (storage|diabetic|malaria|sickle)");
                 println!("  -n, --steps N          Number of physics steps (default: 1000)");
                 println!("  -f, --force F          Force magnitude in μN (default: 5.0)");
@@ -1106,6 +1116,74 @@ fn run_coupled_diagnostics(
     Ok(())
 }
 
+/// Phase 10.5: multi-cell scaling diagnostic.
+///
+/// Builds a `World` of `n_cells` cells, runs `duration_sec` seconds of
+/// simulated time, and reports throughput. The N=1 baseline is also run
+/// for comparison so the user can see the per-cell wall-clock cost.
+fn run_multi_cell_diagnostic(n_cells: usize, duration_sec: f64) -> Result<()> {
+    use cell_simulator_x::config::Parameters;
+    use cell_simulator_x::coupling::CoupledConfig;
+    use cell_simulator_x::world::World;
+
+    println!("=== Cell Simulator X — Multi-Cell Scaling Diagnostic ===\n");
+    println!("Cells:     {}", n_cells);
+    println!("Duration:  {:.2} s simulated", duration_sec);
+
+    let params = Parameters::load_or_default();
+    let config = CoupledConfig {
+        // Reduced substeps for tractable wall-clock at large N.
+        physics_substeps: 50,
+        ..CoupledConfig::default()
+    };
+
+    // Baseline run at N=1 to anchor the linear-scaling expectation.
+    println!("\n--- Baseline (N=1) ---");
+    let mut baseline = World::new(config.clone());
+    let baseline_handle = baseline.add_cell(&params);
+    let t0 = Instant::now();
+    baseline.run(duration_sec);
+    let baseline_elapsed = t0.elapsed();
+    println!("Wall-clock: {:.2?}", baseline_elapsed);
+
+    let baseline_diag = baseline.cell(baseline_handle).diagnostics();
+    println!("ATP @ N=1:  {:.3} mM", baseline_diag.atp_mM);
+
+    // Multi-cell run.
+    println!("\n--- Multi-cell (N={}) ---", n_cells);
+    let mut world = World::new(config);
+    let mut handles = Vec::with_capacity(n_cells);
+    for _ in 0..n_cells {
+        handles.push(world.add_cell(&params));
+    }
+    let t0 = Instant::now();
+    world.run(duration_sec);
+    let multi_elapsed = t0.elapsed();
+    println!("Wall-clock: {:.2?}", multi_elapsed);
+
+    // Linear-scaling factor: how much wall-clock did we pay per added cell?
+    // Embarrassingly-parallel ideal: N cells in (N / num_threads) × baseline.
+    let baseline_secs = baseline_elapsed.as_secs_f64().max(1e-6);
+    let multi_secs = multi_elapsed.as_secs_f64().max(1e-6);
+    let scaling = multi_secs / baseline_secs;
+    let per_cell_factor = scaling / n_cells as f64;
+    println!("Scaling:    {:.2}× baseline ({:.2}× per cell, ideal=1.0/threads)",
+        scaling, per_cell_factor);
+
+    // Show per-cell ATP variance (should be tiny — they're independent runs of the
+    // same simulator, only diverging via DPD random forces).
+    let atp_idx = world.cell(handles[0]).biochemistry.indices.glycolysis.atp;
+    let atps: Vec<f64> = world.cells().iter().map(|c| c.metabolites.get(atp_idx)).collect();
+    let atp_min = atps.iter().cloned().fold(f64::INFINITY, f64::min);
+    let atp_max = atps.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let atp_mean: f64 = atps.iter().sum::<f64>() / atps.len() as f64;
+    println!("ATP across {} cells: min={:.3} mean={:.3} max={:.3} mM",
+        n_cells, atp_min, atp_mean, atp_max);
+
+    println!("\n=== Done ===");
+    Ok(())
+}
+
 /// Phase 10: run the empirical validation suite.
 ///
 /// Available only when the `validation` Cargo feature is enabled. Without
@@ -1196,6 +1274,10 @@ fn main() -> Result<()> {
 
     if cli.validate {
         return run_validation();
+    }
+
+    if let Some(n) = cli.diagnose_multi_cell {
+        return run_multi_cell_diagnostic(n, cli.duration_sec);
     }
 
     log::info!("Cell Simulator X starting...");

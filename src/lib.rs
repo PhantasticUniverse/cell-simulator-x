@@ -86,6 +86,7 @@ pub mod geometry;
 pub mod physics;
 pub mod render;
 pub mod state;
+pub mod world;
 
 // Phase 10: Empirical validation against published reference curves.
 // Gated behind the `validation` feature so production builds and the GUI
@@ -127,3 +128,5 @@ pub use geometry::{Mesh, SpectrinNetwork};
 pub use physics::{PhysicsConfig, PhysicsSolver};
 pub use render::{Camera, ExportAction, HudColors, HudOverlay, HudState, HudTheme, RenderState};
 pub use state::{CellState, DiseaseIndicator, MetaboliteStatus, SimulationMetrics, SimulationMode};
+// Phase 10.5: Multi-cell World/Cell API
+pub use world::{Cell, CellHandle, World};
