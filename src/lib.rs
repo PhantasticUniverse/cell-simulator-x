@@ -79,6 +79,7 @@
 #![allow(non_snake_case)]
 
 pub mod biochemistry;
+pub mod compute;
 pub mod config;
 pub mod coupling;
 pub mod export;

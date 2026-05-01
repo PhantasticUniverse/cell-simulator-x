@@ -213,6 +213,8 @@ struct CliArgs {
     validate: bool,
     /// Phase 10.5: multi-cell scaling diagnostic. Number of cells to run.
     diagnose_multi_cell: Option<usize>,
+    /// Phase 11.0: GPU compute pipeline sentinel (vec_add CPU=GPU check).
+    diagnose_gpu: bool,
     steps: usize,
     force: f32,
     duration_sec: f64,
@@ -246,6 +248,7 @@ impl Default for CliArgs {
             disease_param: 0.0,
             validate: false,
             diagnose_multi_cell: None,
+            diagnose_gpu: false,
             steps: 1000,
             force: 5.0,
             duration_sec: 60.0,  // 60 seconds default for metabolism
@@ -285,6 +288,7 @@ fn parse_args() -> CliArgs {
                     cli.diagnose_multi_cell = Some(args[i].parse().unwrap_or(10));
                 }
             }
+            "--diagnose-gpu" => cli.diagnose_gpu = true,
             "--diagnose-disease" => {
                 i += 1;
                 if i < args.len() {
@@ -390,6 +394,7 @@ fn parse_args() -> CliArgs {
                 println!("  --diagnose-coupled     Run mechano-metabolic coupling diagnostics (no GUI)");
                 println!("  --validate             Phase 10: empirical validation suite (requires --features validation)");
                 println!("  --diagnose-multi-cell N  Phase 10.5: multi-cell scaling diagnostic, N cells");
+                println!("  --diagnose-gpu         Phase 11.0: GPU compute sentinel (vec_add CPU=GPU)");
                 println!("  --diagnose-disease D   Run disease model diagnostics (storage|diabetic|malaria|sickle)");
                 println!("  -n, --steps N          Number of physics steps (default: 1000)");
                 println!("  -f, --force F          Force magnitude in μN (default: 5.0)");
@@ -1278,6 +1283,10 @@ fn main() -> Result<()> {
 
     if let Some(n) = cli.diagnose_multi_cell {
         return run_multi_cell_diagnostic(n, cli.duration_sec);
+    }
+
+    if cli.diagnose_gpu {
+        return cell_simulator_x::compute::run_diagnose_gpu();
     }
 
     log::info!("Cell Simulator X starting...");

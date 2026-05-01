@@ -22,6 +22,7 @@ cargo run -- --diagnose-coupled --tension 2.0 -d 60            # With tension ov
 cargo run --features validation -- --validate                  # Phase 10 empirical validation suite
 cargo test --features validation --test validation_suite       # Validation tests
 cargo run --release -- --diagnose-multi-cell 10 -d 1.0         # Phase 10.5 multi-cell scaling diagnostic
+cargo run --release -- --diagnose-gpu                          # Phase 11.0 GPU compute sentinel (vec_add CPU=GPU)
 cargo run -- --help                  # Full CLI options
 ```
 
@@ -44,6 +45,7 @@ cargo run -- --help                  # Full CLI options
 | `export` | Screenshot, CSV time-series, JSON state export |
 | `validation` | (feature `validation`) Empirical fits vs Imai 1981, Mulquiney 1999, Rief 1999, Waugh-Evans 1979, Dao 2003 |
 | `world` | Multi-cell `World` + `Cell` + `CellHandle` (Phase 10.5); rayon-parallel per-cell stepping |
+| `compute` | GPU compute scaffolding (Phase 11.0); `ComputeContext` headless wgpu, `vec_add` sentinel kernel |
 
 ## Current Status
 
@@ -59,6 +61,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 9: GUI HUD & Export ✅ (Real-time metabolite display, JSON/CSV export)
 - Phase 10: Empirical Validation Foundation ✅ (Imai/Mulquiney/Rief/Waugh-Evans/Dao; aldolase Keq bug fix; PPP refit; see `docs/validation_report_v1.md`)
 - Phase 10.5: Multi-Cell Architecture Refactor ✅ (World/Cell/CellHandle; rayon parallelism; N=100 demo; SoA + buffer-tension deferred to Phase 11; see `docs/phase_10_5_notes.md`)
+- Phase 11.0: GPU Compute Scaffolding ✅ (ComputeContext headless wgpu, vec_add sentinel kernel, --diagnose-gpu, CPU=GPU bitwise on Apple M4 Max; dependency upgrade deferred per `docs/phase_11_0_notes.md`)
 
 ## Development
 
