@@ -46,17 +46,20 @@ pub use physics::{
     WlcBackendData,
 };
 
-/// Headless wgpu compute context.
+/// Wgpu compute context.
 ///
-/// Owns its own `Device` and `Queue` and does not participate in any
-/// surface. Multiple [`ComputeContext`]s can coexist with a
-/// [`crate::render::RenderState`] but they will not share buffers
-/// (that's the 11.4 deliverable).
+/// Phase 11.0 default: headless — owns its own `Device` and `Queue`
+/// (created in [`Self::new_headless`]).
+///
+/// Phase 11.4 addition: a `ComputeContext` can also borrow an existing
+/// `Arc<Device>`/`Arc<Queue>` from a [`crate::render::RenderState`] via
+/// [`Self::from_shared`], so a render pipeline and a compute pipeline
+/// can share storage buffers without a CPU round-trip.
 pub struct ComputeContext {
-    /// The adapter used to create the device. Held so the device's
-    /// lifetime is tied to it and so callers can interrogate adapter
-    /// info for diagnostics.
-    pub adapter: wgpu::Adapter,
+    /// The adapter used to create the device, when this context owns its
+    /// own. `None` for [`Self::from_shared`] contexts (which borrow the
+    /// device from a `RenderState`).
+    pub adapter: Option<wgpu::Adapter>,
     /// The compute device. `Arc` so it can be borrowed by kernel
     /// helpers without forcing them to take a `&self` lifetime.
     pub device: Arc<wgpu::Device>,
@@ -100,7 +103,7 @@ impl ComputeContext {
             .context("failed to request compute device")?;
 
         Ok(Self {
-            adapter,
+            adapter: Some(adapter),
             device: Arc::new(device),
             queue: Arc::new(queue),
         })
@@ -111,12 +114,31 @@ impl ComputeContext {
         pollster::block_on(Self::new_headless())
     }
 
-    /// Pretty-print adapter info.
+    /// Build a `ComputeContext` that borrows the device + queue of an
+    /// existing `RenderState` (Phase 11.4). Storage buffers allocated
+    /// against this context can be bound directly into the render
+    /// pipeline's vertex shader, eliminating CPU round-trips during the
+    /// substep hot path.
+    ///
+    /// The returned context has `adapter = None` because the render path
+    /// already owns the adapter; for diagnostics, query the original
+    /// `RenderState` directly.
+    pub fn from_shared(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self {
+        Self {
+            adapter: None,
+            device,
+            queue,
+        }
+    }
+
+    /// Pretty-print adapter info, when this context owns one.
     pub fn adapter_summary(&self) -> String {
-        let info = self.adapter.get_info();
-        format!(
-            "{} ({:?} on {:?})",
-            info.name, info.device_type, info.backend
-        )
+        match &self.adapter {
+            Some(adapter) => {
+                let info = adapter.get_info();
+                format!("{} ({:?} on {:?})", info.name, info.device_type, info.backend)
+            }
+            None => "(borrowed from RenderState — query render adapter for info)".to_string(),
+        }
     }
 }
