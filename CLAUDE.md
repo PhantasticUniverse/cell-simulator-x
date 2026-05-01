@@ -62,6 +62,7 @@ cargo run -- --help                  # Full CLI options
 - Phase 10: Empirical Validation Foundation ✅ (Imai/Mulquiney/Rief/Waugh-Evans/Dao; aldolase Keq bug fix; PPP refit; see `docs/validation_report_v1.md`)
 - Phase 10.5: Multi-Cell Architecture Refactor ✅ (World/Cell/CellHandle; rayon parallelism; N=100 demo; SoA + buffer-tension deferred to Phase 11; see `docs/phase_10_5_notes.md`)
 - Phase 11.0: GPU Compute Scaffolding ✅ (ComputeContext headless wgpu, vec_add sentinel kernel, --diagnose-gpu, CPU=GPU bitwise on Apple M4 Max; dependency upgrade deferred per `docs/phase_11_0_notes.md`)
+- Phase 11.2.A: Glycolysis on GPU ✅ (11 enzymes + RK4 in WGSL; 0.0000% rel-err per species after 1s simulation vs CPU baseline; see `docs/phase_11_2_a_notes.md`)
 
 ## Development
 
