@@ -23,6 +23,7 @@ cargo run --features validation -- --validate                  # Phase 10 empiri
 cargo test --features validation --test validation_suite       # Validation tests
 cargo run --release -- --diagnose-multi-cell 10 -d 1.0         # Phase 10.5 multi-cell scaling diagnostic
 cargo run --release -- --diagnose-gpu                          # Phase 11.0 GPU compute sentinel (vec_add CPU=GPU)
+cargo run --release -- --diagnose-splenic-transit --storage-day 21 --slit-width 0.7  # Phase C-hybrid splenic transit
 cargo run -- --help                  # Full CLI options
 ```
 
@@ -46,7 +47,7 @@ cargo run -- --help                  # Full CLI options
 | `validation` | (feature `validation`) Empirical fits vs Imai 1981, Mulquiney 1999, Rief 1999, Waugh-Evans 1979, Dao 2003 |
 | `world` | Multi-cell `World` + `Cell` + `CellHandle` (Phase 10.5); rayon-parallel per-cell stepping |
 | `compute` | GPU compute scaffolding (Phase 11.0); `ComputeContext` headless wgpu, `vec_add` sentinel kernel |
-| `flow` | (Phase 12.A) Analytic external fluid: `Poiseuille` cylindrical channel + Stokes-form drag for vertex/flow coupling |
+| `flow` | (Phase 12.A–C-hybrid) Analytic external fluid: `Poiseuille` cylindrical channel + `SplenicSlit` rectangular slot + Stokes-form drag for vertex/flow coupling |
 | `storage` | (Phase 14.A–D) 42-day storage lesion simulator: multi-rate ms/s/day scheme, `StorageCurveSimulator` matches Hess 2010 metabolomics; Phase 14.D adds `AdditiveSolution` (CPD / AS-3 / SAGM / PAGGSM), Q10-scaled supercooled storage, ±20% sensitivity sweep |
 
 ## Current Status
@@ -78,6 +79,9 @@ cargo run -- --help                  # Full CLI options
 - Phase 12.B.2: World::apply_poiseuille_drag CPU+GPU parity ✅ (rayon-parallel per-cell drag write into `PhysicsState::external_forces_uN`; `tests/flow_cpu_gpu_parity.rs` proves Poiseuille CPU/GPU within <1e-3 μm centroid drift after 100 substeps)
 - Phase 12.C.1: Fischer 2007 tank-treading validation ✅ (Keller-Skalak 1982 analytic prediction `f_TT = (γ̇/2π)·2αβ/(α²+β²)` matches Fischer 2007's K(λ) range 0.04–0.15 within χ²/dof < 2; configuration-level analogous to Dao 2003)
 - Phase 12.C.2: Skalak 1973 parachute shape validation ✅ (capillary number `Ca = μ_ext·γ̇·R / μ_s` + empirical AR(Ca) fit; AR predictions 1.40 / 1.66 / 2.13 at γ̇_wall ∈ {100,200,400} /s lie within Skalak 1973's reported 1.5–2.0 band; full dynamic simulation deferred)
+- Phase C-hybrid.1: Storage cell-state snapshot ✅ (`StorageCurveSimulator::cell_state_at_day(d)` returns full 38-species pool + spectrin-modulator + envelope state; replay parity <1% rel ATP error)
+- Phase C-hybrid.2: SplenicSlit + transit simulator ✅ (`flow::SplenicSlit` rectangular slot + `SlitFlow` parabolic-in-narrow-direction velocity profile; `storage::run_splenic_transit` couples cell snapshot with slit drag; CLI `--diagnose-splenic-transit --storage-day N --slit-width W`)
+- Phase C-hybrid.3: transit-time-vs-storage-day sweep ✅ (`sweep_storage_day_x_slit_width` 7×3 grid in ~4s wall-clock; `target/splenic_transit_storage_curve.csv`; slit-width effect strong, storage-day effect muted by current `SpectrinModulator` 0.5x stiffening cap — see `docs/phase_c_hybrid_notes.md`)
 - Phase 14.A: Storage lesion at physiological timescale ✅ (multi-rate ms/s/day scheme; `StorageCurveSimulator` produces 42-day metabolite trajectory matching Hess 2010 ATP and 2,3-DPG envelopes; ion gradients trend correctly but quantitative Hess targets need Phase 14.B analytic QSS; see `docs/phase_14_notes.md`)
 - Phase 14.B: Analytic ion quasi-steady-state ✅ (`solve_ion_qss` bisection drives Na+/K+ to pump+leak equilibrium each storage day; day-42 QSS lands at Na≈96 mM (Hess 2010 reports ~60 mM — gap is a parameter-identifiability finding for envelope re-fitting in 14.B'); Hess 2010 quantitative match deferred to envelope re-fit)
 - Phase 14.C: Deformability decline coupling ✅ (`StorageSample::deformability_relative` from Phase 8 `SpectrinModulator`'s ATP→stiffness; 1.000 → 0.728 over 42 days, matches ~30% decline reported by Hess 2010 / Pivkin 2011)
