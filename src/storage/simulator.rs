@@ -11,6 +11,26 @@ use crate::biochemistry::{
 use crate::coupling::SpectrinModulator;
 use crate::storage::additive::AdditiveSolution;
 
+/// Phase C-hybrid.1: snapshot of full cell state at a given storage day.
+///
+/// Captures the metabolite pool plus the envelope-derived membrane
+/// parameters needed to drive a downstream physics simulation (e.g.,
+/// splenic-slit transit). Returned by
+/// [`StorageCurveSimulator::cell_state_at_day`].
+#[derive(Debug, Clone)]
+pub struct StorageCellSnapshot {
+    pub day: f64,
+    pub pool: MetabolitePool,
+    /// ATP-driven spectrin stiffness modifier (Phase 8). Used downstream
+    /// to scale the cell's effective shear modulus when running the
+    /// transit simulation.
+    pub stiffness_modifier: f64,
+    pub pump_efficiency: f64,
+    pub leak_multiplier: f64,
+    pub oxidative_stress: f64,
+    pub deformability_relative: f64,
+}
+
 /// Per-day sample of the cell state.
 #[derive(Debug, Clone, Copy)]
 pub struct StorageSample {
@@ -207,7 +227,7 @@ pub struct StorageCurveSimulator {
     /// deformability index from current ATP at each storage day.
     pub spectrin_modulator: SpectrinModulator,
     samples: Vec<StorageSample>,
-    indices: FullyIntegratedIndices,
+    pub indices: FullyIntegratedIndices,
 }
 
 impl StorageCurveSimulator {
@@ -394,6 +414,41 @@ impl StorageCurveSimulator {
                 let db = (b.day - target_day).abs();
                 da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             })
+    }
+
+    /// Phase C-hybrid.1: snapshot of the full cell state at storage
+    /// day `target_day`. The snapshot can be loaded into a fresh
+    /// simulator (e.g. for downstream splenic-transit simulation under
+    /// flow) without re-running the full storage curve.
+    ///
+    /// Internally the method advances a copy of the simulator from day 0
+    /// to `target_day` and captures the metabolite pool, the ATP-driven
+    /// stiffness modifier (Phase 8 / 14.C), and the envelope-derived
+    /// pump and leak parameters at that day.
+    pub fn cell_state_at_day(&self, target_day: f64) -> StorageCellSnapshot {
+        // Build a replay simulator with the same config, end at target_day.
+        let mut config = self.config.clone();
+        config.end_day = target_day;
+        let mut replay = StorageCurveSimulator::with_solver_config(
+            config,
+            FullyIntegratedConfig {
+                dt_sec: self.config.bio_dt_sec,
+                ..FullyIntegratedConfig::default()
+            },
+        );
+        replay.run();
+        let s = replay.sample_at_day(target_day).expect("replay produced no sample");
+        let stiffness_modifier =
+            self.spectrin_modulator.stiffness_modifier(s.atp_mM) as f64;
+        StorageCellSnapshot {
+            day: s.day,
+            pool: replay.pool.clone(),
+            stiffness_modifier,
+            pump_efficiency: s.pump_efficiency,
+            leak_multiplier: s.leak_multiplier,
+            oxidative_stress: s.oxidative_stress,
+            deformability_relative: s.deformability_relative,
+        }
     }
 
     /// Write the recorded samples as CSV. Header includes one column per

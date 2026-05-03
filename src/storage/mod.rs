@@ -52,4 +52,6 @@ pub use sensitivity::{
     run_oat_sensitivity, top_sensitivities_by_deformability, write_csv as write_sensitivity_csv,
     SensitivityParameter, SensitivityRow, ALL_PARAMETERS,
 };
-pub use simulator::{StorageCurveSimulator, StorageSample, StorageSimConfig};
+pub use simulator::{
+    StorageCellSnapshot, StorageCurveSimulator, StorageSample, StorageSimConfig,
+};
