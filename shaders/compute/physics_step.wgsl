@@ -52,15 +52,19 @@ struct U {
     _pad1: f32,
 }
 
-@group(0) @binding(0)  var<storage, read_write> positions:     array<f32>;        // n_vertices * 3
-@group(0) @binding(1)  var<storage, read_write> velocities:    array<f32>;        // n_vertices * 3
-@group(0) @binding(2)  var<storage, read_write> forces:        array<f32>;        // n_vertices * 3
-@group(0) @binding(3)  var<storage, read>       wlc_baseline:  array<f32>;        // n_vertices * 3
-@group(0) @binding(4)  var<storage, read>       elements:      array<Element>;    // n_elements
-@group(0) @binding(5)  var<storage, read>       csr_offsets:   array<u32>;        // n_vertices + 1
-@group(0) @binding(6)  var<storage, read>       csr_data:      array<u32>;
-@group(0) @binding(7)  var<storage, read_write> elem_forces:   array<f32>;        // n_elements * 9
+@group(0) @binding(0)  var<storage, read_write> positions:       array<f32>;        // n_vertices * 3
+@group(0) @binding(1)  var<storage, read_write> velocities:      array<f32>;        // n_vertices * 3
+@group(0) @binding(2)  var<storage, read_write> forces:          array<f32>;        // n_vertices * 3
+@group(0) @binding(3)  var<storage, read>       wlc_baseline:    array<f32>;        // n_vertices * 3
+@group(0) @binding(4)  var<storage, read>       elements:        array<Element>;    // n_elements
+@group(0) @binding(5)  var<storage, read>       csr_offsets:     array<u32>;        // n_vertices + 1
+@group(0) @binding(6)  var<storage, read>       csr_data:        array<u32>;
+@group(0) @binding(7)  var<storage, read_write> elem_forces:     array<f32>;        // n_elements * 9
 @group(0) @binding(8)  var<uniform>             u: U;
+// Phase 12.B.1: external forces (e.g., Poiseuille drag) added per-vertex
+// in `skalak_init_from_baseline`. Default-zero; host writes via
+// `PhysicsBackend::set_external_forces`.
+@group(0) @binding(9)  var<storage, read>       external_forces: array<f32>;        // n_vertices * 3
 
 // === Verlet kernels =================================================
 
@@ -186,6 +190,12 @@ fn skalak_init_from_baseline(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Start from WLC baseline (constant per substep — see file header).
     let bb = v * 3u;
     var sum = vec3<f32>(wlc_baseline[bb + 0u], wlc_baseline[bb + 1u], wlc_baseline[bb + 2u]);
+
+    // Phase 12.B.1: external forces (Poiseuille drag, etc.). Host
+    // writes per-substep; default-zero buffer is a no-op.
+    sum.x = sum.x + external_forces[bb + 0u];
+    sum.y = sum.y + external_forces[bb + 1u];
+    sum.z = sum.z + external_forces[bb + 2u];
 
     let start = csr_offsets[v];
     let end = csr_offsets[v + 1u];

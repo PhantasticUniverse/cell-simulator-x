@@ -90,12 +90,19 @@ impl ComputeContext {
 
         log::info!("Compute adapter: {:?}", adapter.get_info());
 
+        // Phase 12.B.1: PhysicsBackend uses 9 storage buffers per dispatch
+        // (positions, velocities, forces, wlc_baseline, elements,
+        // csr_offsets, csr_data, elem_forces, external_forces). The wgpu
+        // default `max_storage_buffers_per_shader_stage = 8` is too low;
+        // Apple Silicon and modern desktop GPUs all support ≥ 16.
+        let mut limits = wgpu::Limits::default();
+        limits.max_storage_buffers_per_shader_stage = 16;
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("Cell Simulator X Compute Device"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
+                    required_limits: limits,
                 },
                 None,
             )

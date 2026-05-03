@@ -1241,6 +1241,9 @@ pub struct PhysicsBackend {
     buf_csr_data: wgpu::Buffer,
     #[allow(dead_code)]
     buf_elem_forces: wgpu::Buffer,
+    /// Phase 12.B.1: per-vertex external forces (e.g., flow drag).
+    /// Default-zero; host updates via `set_external_forces`.
+    buf_external_forces: wgpu::Buffer,
     pos_bytes: u64,
     device: std::sync::Arc<wgpu::Device>,
     queue: std::sync::Arc<wgpu::Queue>,
@@ -1311,6 +1314,14 @@ impl PhysicsBackend {
             label: Some("backend wlc_baseline"),
             contents: bytemuck::cast_slice(&wlc_f32),
             usage: wgpu::BufferUsages::STORAGE,
+        });
+        // Phase 12.B.1: zero-initialized external forces buffer; host
+        // writes Poiseuille drag (or any other per-vertex force field)
+        // via `PhysicsBackend::set_external_forces`.
+        let buf_external_forces = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("backend external_forces"),
+            contents: bytemuck::cast_slice(&zero_pos),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
         let elements_pod: Vec<ElementGpu> = skalak_backend
@@ -1391,6 +1402,7 @@ impl PhysicsBackend {
                     },
                     count: None,
                 },
+                storage(9, true),  // external_forces (Phase 12.B.1)
             ],
         });
 
@@ -1407,6 +1419,7 @@ impl PhysicsBackend {
                 wgpu::BindGroupEntry { binding: 6, resource: buf_csr_data.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 7, resource: buf_elem_forces.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 8, resource: buf_uniforms.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 9, resource: buf_external_forces.as_entire_binding() },
             ],
         });
 
@@ -1459,10 +1472,41 @@ impl PhysicsBackend {
             buf_csr_offsets,
             buf_csr_data,
             buf_elem_forces,
+            buf_external_forces,
             pos_bytes,
             device: ctx.device.clone(),
             queue: ctx.queue.clone(),
         })
+    }
+
+    /// Phase 12.B.1: upload per-vertex external forces (Poiseuille drag,
+    /// any other force field). Picked up by the next call to `step()`
+    /// inside `skalak_init_from_baseline`. The buffer persists across
+    /// substeps; call this once per substep with the latest drag (or
+    /// once per outer flow update if drag is quasi-stationary).
+    pub fn set_external_forces(&self, forces: &[Vec3]) -> Result<()> {
+        anyhow::ensure!(
+            forces.len() == self.n_vertices as usize,
+            "external_forces length {} does not match n_vertices {}",
+            forces.len(), self.n_vertices
+        );
+        let mut buf = vec![0f32; forces.len() * 3];
+        for (i, f) in forces.iter().enumerate() {
+            buf[i * 3 + 0] = f.x;
+            buf[i * 3 + 1] = f.y;
+            buf[i * 3 + 2] = f.z;
+        }
+        self.queue
+            .write_buffer(&self.buf_external_forces, 0, bytemuck::cast_slice(&buf));
+        Ok(())
+    }
+
+    /// Reset external forces to zero. Equivalent to
+    /// `set_external_forces(&vec![Vec3::ZERO; n_vertices])` but cheaper.
+    pub fn clear_external_forces(&self) {
+        let zero = vec![0f32; self.n_vertices as usize * 3];
+        self.queue
+            .write_buffer(&self.buf_external_forces, 0, bytemuck::cast_slice(&zero));
     }
 
     /// Run one physics substep on the GPU. Mirrors `PhysicsSolver::step`
