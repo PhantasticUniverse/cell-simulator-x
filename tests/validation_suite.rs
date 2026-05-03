@@ -113,6 +113,32 @@ fn rief_1999_spectrin_fx_within_tolerance() {
     );
 }
 
+#[test]
+fn fischer_2007_tank_treading_within_tolerance() {
+    let report = run_full_suite();
+    let exp = report.experiments.iter()
+        .find(|e| e.name == "fischer_2007_tank_treading")
+        .expect("fischer_2007_tank_treading not found");
+    assert!(
+        exp.passed,
+        "Fischer 2007 tank-treading failed: χ²/dof = {:.3}. Notes: {:?}",
+        exp.metrics.chi2_per_dof, exp.notes,
+    );
+}
+
+#[test]
+fn skalak_1973_parachute_within_tolerance() {
+    let report = run_full_suite();
+    let exp = report.experiments.iter()
+        .find(|e| e.name == "skalak_1973_parachute")
+        .expect("skalak_1973_parachute not found");
+    assert!(
+        exp.passed,
+        "Skalak 1973 parachute failed: χ²/dof = {:.3}. Notes: {:?}",
+        exp.metrics.chi2_per_dof, exp.notes,
+    );
+}
+
 // Mulquiney metabolites and PPP flux are not asserted in this initial
 // sweep — they are *known* to fail (the audit canary). The suite still
 // runs them so the report shows the magnitude of the gap; the dedicated

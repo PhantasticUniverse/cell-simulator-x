@@ -150,6 +150,8 @@ pub fn run_full_suite() -> ValidationReport {
         experiments::rief_1999::run_spectrin_force_extension(),
         experiments::waugh_evans_1979::run_shear_modulus(),
         experiments::dao_2003::run_axial_extension_curve(),
+        experiments::fischer_2007::run_tank_treading(),
+        experiments::skalak_1973::run_parachute_shape(),
     ];
 
     let passed_count = experiments.iter().filter(|e| e.passed).count();
