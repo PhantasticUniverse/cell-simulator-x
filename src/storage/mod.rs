@@ -44,7 +44,12 @@
 //! | 42  | ≈ 0.5    | 0            | 50–70    | 80–100  |
 
 pub mod additive;
+pub mod sensitivity;
 pub mod simulator;
 
 pub use additive::AdditiveSolution;
+pub use sensitivity::{
+    run_oat_sensitivity, top_sensitivities_by_deformability, write_csv as write_sensitivity_csv,
+    SensitivityParameter, SensitivityRow, ALL_PARAMETERS,
+};
 pub use simulator::{StorageCurveSimulator, StorageSample, StorageSimConfig};
