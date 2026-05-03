@@ -47,7 +47,7 @@ cargo run -- --help                  # Full CLI options
 | `world` | Multi-cell `World` + `Cell` + `CellHandle` (Phase 10.5); rayon-parallel per-cell stepping |
 | `compute` | GPU compute scaffolding (Phase 11.0); `ComputeContext` headless wgpu, `vec_add` sentinel kernel |
 | `flow` | (Phase 12.A) Analytic external fluid: `Poiseuille` cylindrical channel + Stokes-form drag for vertex/flow coupling |
-| `storage` | (Phase 14.A) 42-day storage lesion simulator: multi-rate ms/s/day scheme, `StorageCurveSimulator` outputs metabolite trajectories matching Hess 2010 envelopes |
+| `storage` | (Phase 14.A–D) 42-day storage lesion simulator: multi-rate ms/s/day scheme, `StorageCurveSimulator` matches Hess 2010 metabolomics; Phase 14.D adds `AdditiveSolution` (CPD / AS-3 / SAGM / PAGGSM), Q10-scaled supercooled storage, ±20% sensitivity sweep |
 
 ## Current Status
 
@@ -79,6 +79,9 @@ cargo run -- --help                  # Full CLI options
 - Phase 14.C: Deformability decline coupling ✅ (`StorageSample::deformability_relative` from Phase 8 `SpectrinModulator`'s ATP→stiffness; 1.000 → 0.728 over 42 days, matches ~30% decline reported by Hess 2010 / Pivkin 2011)
 - Phase 14.B': Storage envelope calibrated to Hess 2010 day-42 ✅ (`pump_efficiency_decay_per_day` 0.02 → 0.0168; storage curve now hits Na ≈ 60 mM / K ≈ 90 mM at day 42 exactly; day-14 ions remain underestimated as a documented linear-envelope limitation)
 - Phase 14.B'': Exponential pump-efficiency envelope ✅ (`use_exponential_pump_envelope` default-on; matches Hess 2010 ion targets at days 0/14/42 simultaneously: Na = 10/26/60 mM, K = 144/127/91 mM)
+- Phase 14.D.1: AS-3 / SAGM / PAGGSM additive comparator presets ✅ (`AdditiveSolution` enum + `StorageSimConfig::with_additive`; per-additive `lesion_config()` derives ATP T_half analytically from day-42 retention; presets within 15% of literature; see `docs/phase_14_d_notes.md`)
+- Phase 14.D.2: Supercooled storage with Q10 = 2.5 ✅ (`StorageSimConfig::supercooled` runs at -4°C / day 100; envelope rates Q10-scaled per Hess 2010 review; -4°C / day-100 deformability within 1.5% of standard 4°C / day-42)
+- Phase 14.D.3: Sensitivity analysis sweep ✅ (`run_oat_sensitivity` ±20% perturbation on 5 envelope parameters; `target/storage_sensitivity.csv` CSV deliverable; ATP half-life dominates day-42 ATP/deformability; pump/leak/oxidative parameters affect ions but not ATP under `force_atp_dpg_targets = true`)
 
 ## Development
 
