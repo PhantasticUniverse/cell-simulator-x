@@ -46,6 +46,7 @@
 pub mod additive;
 pub mod sensitivity;
 pub mod simulator;
+pub mod transit;
 
 pub use additive::AdditiveSolution;
 pub use sensitivity::{
@@ -54,4 +55,8 @@ pub use sensitivity::{
 };
 pub use simulator::{
     StorageCellSnapshot, StorageCurveSimulator, StorageSample, StorageSimConfig,
+};
+pub use transit::{
+    run_splenic_transit, sweep_storage_day_x_slit_width, write_transit_csv,
+    SplenicTransitConfig, SplenicTransitResult,
 };

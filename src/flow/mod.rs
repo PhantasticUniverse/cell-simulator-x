@@ -19,7 +19,11 @@
 //!   (Fischer, T. M. _Biophys. J._ 93, 2553–2561).
 
 pub mod poiseuille;
+pub mod slit;
 
 pub use poiseuille::{
     apply_drag_to_external_forces, drag_force_uN, CylindricalChannel, Poiseuille,
+};
+pub use slit::{
+    apply_slit_drag_to_external_forces, slit_drag_force_uN, SlitFlow, SplenicSlit,
 };

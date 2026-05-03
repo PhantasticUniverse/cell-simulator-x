@@ -219,6 +219,12 @@ struct CliArgs {
     diagnose_multi_cell: Option<usize>,
     /// Phase 11.0: GPU compute pipeline sentinel (vec_add CPU=GPU check).
     diagnose_gpu: bool,
+    /// Phase C-hybrid: splenic transit at storage day N.
+    diagnose_splenic_transit: bool,
+    /// Storage day for splenic transit (default 21).
+    storage_day: f64,
+    /// Slit width for splenic transit (μm, default 0.7).
+    slit_width_um: f32,
     steps: usize,
     force: f32,
     duration_sec: f64,
@@ -253,6 +259,9 @@ impl Default for CliArgs {
             validate: false,
             diagnose_multi_cell: None,
             diagnose_gpu: false,
+            diagnose_splenic_transit: false,
+            storage_day: 21.0,
+            slit_width_um: 0.7,
             steps: 1000,
             force: 5.0,
             duration_sec: 60.0,  // 60 seconds default for metabolism
@@ -293,6 +302,19 @@ fn parse_args() -> CliArgs {
                 }
             }
             "--diagnose-gpu" => cli.diagnose_gpu = true,
+            "--diagnose-splenic-transit" => cli.diagnose_splenic_transit = true,
+            "--storage-day" => {
+                i += 1;
+                if i < args.len() {
+                    cli.storage_day = args[i].parse().unwrap_or(21.0);
+                }
+            }
+            "--slit-width" => {
+                i += 1;
+                if i < args.len() {
+                    cli.slit_width_um = args[i].parse().unwrap_or(0.7);
+                }
+            }
             "--diagnose-disease" => {
                 i += 1;
                 if i < args.len() {
@@ -1226,6 +1248,57 @@ fn run_validation() -> Result<()> {
     std::process::exit(2);
 }
 
+/// Phase C-hybrid: splenic transit at storage day N.
+///
+/// Reuses the storage simulator's `cell_state_at_day` snapshot, drops
+/// it into a `SplenicTransitConfig`, and prints the transit metrics.
+fn run_diagnose_splenic_transit(storage_day: f64, slit_width_um: f32) -> Result<()> {
+    use cell_simulator_x::flow::SplenicSlit;
+    use cell_simulator_x::storage::{
+        run_splenic_transit, SplenicTransitConfig, StorageCurveSimulator, StorageSimConfig,
+    };
+
+    println!("=== Splenic transit (storage day {:.1}, slit width {:.2} μm) ===",
+        storage_day, slit_width_um);
+    println!();
+
+    // Build storage simulator and snapshot at the requested day.
+    let cfg = StorageSimConfig {
+        seconds_of_bio_per_step: 1.0,
+        end_day: storage_day,
+        ..StorageSimConfig::default()
+    };
+    let sim = StorageCurveSimulator::new(cfg);
+    let snap = sim.cell_state_at_day(storage_day);
+
+    println!(
+        "Cell state at day {:.1}:\n  ATP    = {:.3} mM\n  pump η = {:.3}\n  leak ×  = {:.3}\n  stiff ×  = {:.3}\n  def     = {:.3}\n",
+        snap.day,
+        snap.pool.concentrations_mM[sim.indices.glycolysis.atp],
+        snap.pump_efficiency, snap.leak_multiplier,
+        snap.stiffness_modifier, snap.deformability_relative,
+    );
+
+    let transit_cfg = SplenicTransitConfig {
+        slit: SplenicSlit::with_width(slit_width_um),
+        timeout_simulated_sec: 0.5,
+        ..SplenicTransitConfig::default()
+    };
+
+    let r = run_splenic_transit(&snap, &transit_cfg);
+    println!("Transit result:");
+    println!("  wall shear rate       : {:.0} 1/s", r.wall_shear_rate_per_sec);
+    println!("  transit time          : {:.4} s ({})",
+        r.transit_time_sec,
+        if r.completed { "completed" } else { "TIMEOUT (clearance failure)" });
+    println!("  centroid displacement : {:.3} μm", r.centroid_displacement_um);
+    println!("  peak strain           : {:.3} (rel)", r.peak_strain_relative);
+    println!("  peak velocity         : {:.1} μm/s", r.peak_velocity_um_per_sec);
+    println!("  deformability index   : {:.3}", r.deformability_relative);
+    println!("  wall-clock            : {:.0} ms", r.wall_clock_ms);
+    Ok(())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -1292,6 +1365,10 @@ fn main() -> Result<()> {
 
     if cli.diagnose_gpu {
         return cell_simulator_x::compute::run_diagnose_gpu();
+    }
+
+    if cli.diagnose_splenic_transit {
+        return run_diagnose_splenic_transit(cli.storage_day, cli.slit_width_um);
     }
 
     log::info!("Cell Simulator X starting...");

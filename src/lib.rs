@@ -133,7 +133,8 @@ pub use coupling::{CoupledSolver, CoupledConfig, CoupledDiagnostics, TensionComp
 // Export module
 pub use export::{CsvExporter, TimeSeriesRecord, export_state_json, save_screenshot};
 pub use flow::{
-    apply_drag_to_external_forces, drag_force_uN, CylindricalChannel, Poiseuille,
+    apply_drag_to_external_forces, apply_slit_drag_to_external_forces, drag_force_uN,
+    slit_drag_force_uN, CylindricalChannel, Poiseuille, SlitFlow, SplenicSlit,
 };
 pub use storage::{AdditiveSolution, StorageCurveSimulator, StorageSample, StorageSimConfig};
 pub use geometry::{Mesh, SpectrinNetwork};
