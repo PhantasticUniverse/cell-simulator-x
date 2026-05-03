@@ -124,3 +124,69 @@ single-cell, biochemistry-dominated, and doesn't need flow. Phase 12.B
 + 12.C are valuable for the broader paper but not gating for the
 headline metabolomics curves (D'Alessandro et al., Rolfsson et al.,
 storage time-courses).
+
+---
+
+## Phase 12.B: PhysicsBackend external_forces buffer + World drag helper
+
+Phase 14 has shipped (storage lesion + 14.D extensions). Phase 12.B now
+closes the GPU side of the flow story so single-cell-in-flow scenarios
+can be GPU-accelerated.
+
+### 12.B.1 — PhysicsBackend external_forces buffer
+
+`shaders/compute/physics_step.wgsl` gains a 9th storage buffer (binding
+9, read-only, n_vertices*3*f32):
+```
+@group(0) @binding(9) var<storage, read> external_forces: array<f32>;
+```
+Inside `skalak_init_from_baseline`, each vertex's force aggregation now
+reads `external_forces[v]` alongside `wlc_baseline[v]` and the sum of
+its CSR-aggregated Skalak per-element contributions. Default-zero
+buffer makes the new code path a no-op until the host writes drag.
+
+`PhysicsBackend` exposes `set_external_forces(&[Vec3])` and
+`clear_external_forces()`. The buffer is COPY_DST so
+`queue.write_buffer` works without staging.
+
+`ComputeContext::new_headless` requests
+`max_storage_buffers_per_shader_stage = 16` (wgpu default 8 was the
+Vulkan mobile baseline; Apple Silicon, NVIDIA, AMD all support ≥16).
+
+#### Validation
+
+`tests/physics_external_forces_parity.rs` (2 tests):
+- `external_forces_uniform_constant_parity`: GPU under uniform +z drag
+  (1 nN/vertex) matches CPU reference within 1e-5 μm after 100
+  substeps.
+- `external_forces_zero_matches_baseline_parity`: zero-buffer
+  regression-safety check.
+All 6 prior physics GPU parity tests still pass.
+
+### 12.B.2 — World::apply_poiseuille_drag
+
+`World::apply_poiseuille_drag(&Poiseuille, drag_coeff)` runs
+`flow::apply_drag_to_external_forces` per-cell in parallel via rayon.
+The CPU `PhysicsSolver::step` already reads
+`physics_state.external_forces_uN`, so this completes the CPU path
+end-to-end.
+
+`tests/flow_cpu_gpu_parity.rs::poiseuille_drag_cpu_gpu_parity` proves
+the GPU path matches CPU within tolerance: per substep, drag is
+computed host-side from the GPU's read-back position+velocity and
+uploaded via `set_external_forces`. After 100 substeps:
+- per-vertex |Δpos| < 1e-5 μm
+- cell-centroid drift < 1e-3 μm (the Phase 12.B plan target)
+
+### Deferred to 12.B.3 (post-12.C)
+
+- Per-substep drag computation entirely on GPU (currently the host
+  reads back positions/velocities each substep). Acceptable for now
+  because PhysicsBackend already pays for one read-back per substep.
+  A pure-GPU drag kernel becomes attractive once Phase 13 multi-cell
+  scaling pushes that read-back over budget.
+- Per-cell PhysicsBackend integration in `World` (currently World only
+  uses the CPU PhysicsSolver). The `flow_cpu_gpu_parity` test exercises
+  the GPU path at the PhysicsBackend layer; wiring it through
+  `World::step` is a Phase 13 architectural change since N>1 cells need
+  shared-buffer coordination.
