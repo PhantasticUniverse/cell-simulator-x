@@ -34,6 +34,7 @@ use rayon::prelude::*;
 
 use crate::config::Parameters;
 use crate::coupling::{CoupledConfig, SpectrinModulator};
+use crate::flow::{apply_drag_to_external_forces, Poiseuille};
 
 mod cell;
 pub mod backend;
@@ -163,6 +164,26 @@ impl World {
         for cell in &mut self.cells {
             cell.set_tension_override(tension_pN_per_nm);
         }
+    }
+
+    /// Phase 12.B.2: write per-vertex Poiseuille drag forces into every
+    /// cell's external-forces vector. The values stay until overwritten —
+    /// call this once per substep loop iteration if drag should track
+    /// vertex velocity changes, or once per outer "frame" if quasi-static.
+    ///
+    /// CPU path only — `Cell::physics_state.external_forces_uN` is read
+    /// by `PhysicsSolver::step`. The GPU path lives in
+    /// `PhysicsBackend::set_external_forces` and is wired up at the
+    /// World↔backend boundary in a follow-on phase.
+    pub fn apply_poiseuille_drag(&mut self, flow: &Poiseuille, drag_coeff: f32) {
+        self.cells.par_iter_mut().for_each(|cell| {
+            apply_drag_to_external_forces(
+                &mut cell.physics_state,
+                &cell.mesh,
+                flow,
+                drag_coeff,
+            );
+        });
     }
 }
 
