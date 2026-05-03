@@ -43,6 +43,8 @@
 //! | 14  | ≈ 1.5    | ≈ 0.5        | 20–30    | 110–130 |
 //! | 42  | ≈ 0.5    | 0            | 50–70    | 80–100  |
 
+pub mod additive;
 pub mod simulator;
 
+pub use additive::AdditiveSolution;
 pub use simulator::{StorageCurveSimulator, StorageSample, StorageSimConfig};

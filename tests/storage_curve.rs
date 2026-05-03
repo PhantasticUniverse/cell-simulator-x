@@ -19,13 +19,8 @@ const SECONDS_BIO_PER_STEP: f64 = 2.0;
 
 fn run_full_curve() -> StorageCurveSimulator {
     let config = StorageSimConfig {
-        end_day: 42.0,
-        days_per_step: 1.0,
         seconds_of_bio_per_step: SECONDS_BIO_PER_STEP,
-        bio_dt_sec: 1e-3,
-        force_atp_dpg_targets: true,
-        force_ion_qss: true,
-        use_exponential_pump_envelope: true,
+        ..StorageSimConfig::default()
     };
     let mut sim = StorageCurveSimulator::new(config);
     sim.run();
@@ -167,15 +162,12 @@ fn ion_gradients_trend_correctly() {
 fn ion_gradients_long_equilibration() {
     use cell_simulator_x::storage::{StorageCurveSimulator, StorageSimConfig};
     let mut sim = StorageCurveSimulator::new(StorageSimConfig {
-        end_day: 42.0,
-        days_per_step: 1.0,
         seconds_of_bio_per_step: 30.0,
-        bio_dt_sec: 1e-3,
-        force_atp_dpg_targets: true,
         // Disable QSS — this test exercises the legacy slow-equilibration path.
         force_ion_qss: false,
         // Linear envelope to keep this slow-path test backwards-compatible.
         use_exponential_pump_envelope: false,
+        ..StorageSimConfig::default()
     });
     sim.run();
     let d14 = sim.sample_at_day(14.0).unwrap();

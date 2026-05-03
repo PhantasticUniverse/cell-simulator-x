@@ -135,7 +135,7 @@ pub use export::{CsvExporter, TimeSeriesRecord, export_state_json, save_screensh
 pub use flow::{
     apply_drag_to_external_forces, drag_force_uN, CylindricalChannel, Poiseuille,
 };
-pub use storage::{StorageCurveSimulator, StorageSample, StorageSimConfig};
+pub use storage::{AdditiveSolution, StorageCurveSimulator, StorageSample, StorageSimConfig};
 pub use geometry::{Mesh, SpectrinNetwork};
 pub use physics::{PhysicsConfig, PhysicsSolver};
 pub use render::{Camera, ExportAction, HudColors, HudOverlay, HudState, HudTheme, RenderState};

@@ -4,11 +4,12 @@ use std::path::Path;
 
 use anyhow::{Context as _, Result};
 
-use crate::biochemistry::disease::StorageLesionModel;
+use crate::biochemistry::disease::{StorageLesionConfig, StorageLesionModel};
 use crate::biochemistry::{
     FullyIntegratedConfig, FullyIntegratedIndices, FullyIntegratedSolver, MetabolitePool,
 };
 use crate::coupling::SpectrinModulator;
+use crate::storage::additive::AdditiveSolution;
 
 /// Per-day sample of the cell state.
 #[derive(Debug, Clone, Copy)]
@@ -70,10 +71,23 @@ pub struct StorageSimConfig {
     /// `eff(t) = eff_inf + (1 - eff_inf) · exp(-β · t)` with
     /// `eff_inf = 0.295` and `β = 0.305`/day.
     pub use_exponential_pump_envelope: bool,
+
+    /// Phase 14.D.1: the additive solution preset (CPD, AS-3, SAGM,
+    /// PAGGSM). Drives `lesion_config` and the choice of exponential vs
+    /// linear pump envelope unless the caller overrides those fields
+    /// directly.
+    pub additive: AdditiveSolution,
+
+    /// Phase 14.D.1: full lesion-envelope parameters (ATP half-life,
+    /// pump-decay, leak, oxidative stress). Defaults to
+    /// `additive.lesion_config()` for the chosen `additive`. Override
+    /// directly for one-off parameter sweeps.
+    pub lesion_config: StorageLesionConfig,
 }
 
 impl Default for StorageSimConfig {
     fn default() -> Self {
+        let additive = AdditiveSolution::default();
         Self {
             end_day: 42.0,
             days_per_step: 1.0,
@@ -81,7 +95,23 @@ impl Default for StorageSimConfig {
             bio_dt_sec: 1e-3,
             force_atp_dpg_targets: true,
             force_ion_qss: true,
-            use_exponential_pump_envelope: true,
+            use_exponential_pump_envelope: additive.uses_exponential_pump_envelope(),
+            additive,
+            lesion_config: additive.lesion_config(),
+        }
+    }
+}
+
+impl StorageSimConfig {
+    /// Build a config for the given additive solution. Uses the additive's
+    /// calibrated `lesion_config` and the appropriate pump-envelope shape
+    /// (exponential for CPD; linear for AS-3 / SAGM / PAGGSM).
+    pub fn with_additive(additive: AdditiveSolution) -> Self {
+        Self {
+            additive,
+            lesion_config: additive.lesion_config(),
+            use_exponential_pump_envelope: additive.uses_exponential_pump_envelope(),
+            ..Self::default()
         }
     }
 }
@@ -129,7 +159,7 @@ impl StorageCurveSimulator {
         solver_config.dt_sec = config.bio_dt_sec;
         let solver = FullyIntegratedSolver::new(solver_config);
         let pool = MetabolitePool::default_fully_integrated();
-        let storage = StorageLesionModel::new(0.0);
+        let storage = StorageLesionModel::with_config(0.0, config.lesion_config.clone());
         let indices = FullyIntegratedIndices::new();
         // Default Phase 8 coupling: ATP_ref = 2.0 mM, max stiffening
         // factor = 0.5 (50% stiffer at zero ATP). This sets the ATP →
@@ -187,7 +217,8 @@ impl StorageCurveSimulator {
     /// then push a sample.
     fn step_to_day(&mut self, target_day: f64) {
         // === 1. Update storage envelope ===
-        self.storage = StorageLesionModel::new(target_day);
+        self.storage =
+            StorageLesionModel::with_config(target_day, self.config.lesion_config.clone());
 
         // === 2. Optionally force ATP and 2,3-DPG to envelope targets ===
         if self.config.force_atp_dpg_targets {
@@ -442,12 +473,8 @@ mod tests {
     fn day_0_sample_matches_physiological_defaults() {
         let mut sim = StorageCurveSimulator::new(StorageSimConfig {
             end_day: 0.0,
-            days_per_step: 1.0,
             seconds_of_bio_per_step: 0.0,
-            bio_dt_sec: 1e-3,
-            force_atp_dpg_targets: true,
-            force_ion_qss: true,
-            use_exponential_pump_envelope: true,
+            ..StorageSimConfig::default()
         });
         sim.run();
         let s = sim.samples().first().expect("at least one sample");
@@ -524,12 +551,8 @@ mod tests {
     fn sample_lookup_finds_closest_day() {
         let mut sim = StorageCurveSimulator::new(StorageSimConfig {
             end_day: 5.0,
-            days_per_step: 1.0,
             seconds_of_bio_per_step: 0.05,
-            bio_dt_sec: 1e-3,
-            force_atp_dpg_targets: true,
-            force_ion_qss: true,
-            use_exponential_pump_envelope: true,
+            ..StorageSimConfig::default()
         });
         sim.run();
         let s = sim.sample_at_day(3.5).expect("found");
