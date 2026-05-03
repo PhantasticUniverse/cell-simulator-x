@@ -83,6 +83,19 @@ pub struct StorageSimConfig {
     /// `additive.lesion_config()` for the chosen `additive`. Override
     /// directly for one-off parameter sweeps.
     pub lesion_config: StorageLesionConfig,
+
+    /// Phase 14.D.2: storage temperature in degrees Celsius.
+    /// Standard refrigerated storage = 4 °C (default). Subzero
+    /// supercooled storage protocols (Bruinsma 2019, Berendsen 2014)
+    /// run at -4 °C and extend viable storage to ~100+ days.
+    ///
+    /// At construction the simulator applies Q10 = 2.5 scaling to the
+    /// envelope rates so a colder temperature slows ATP decay, pump
+    /// failure, leak, and oxidative-stress accumulation by the same
+    /// factor. The reference temperature is 4 °C (matching how the
+    /// `lesion_config` rates were calibrated). Q10 = 2.5 is the
+    /// canonical RBC-storage value (Hess 2010 review).
+    pub temperature_celsius: f64,
 }
 
 impl Default for StorageSimConfig {
@@ -98,8 +111,23 @@ impl Default for StorageSimConfig {
             use_exponential_pump_envelope: additive.uses_exponential_pump_envelope(),
             additive,
             lesion_config: additive.lesion_config(),
+            temperature_celsius: 4.0,
         }
     }
+}
+
+/// Phase 14.D.2: Q10 temperature coefficient for RBC storage envelope
+/// rates. Hess 2010 review gives Q10 ≈ 2 to 3 across stored-RBC
+/// metabolism / membrane-protein chemistry; we adopt 2.5 as the
+/// canonical midpoint.
+const Q10: f64 = 2.5;
+const Q10_REFERENCE_CELSIUS: f64 = 4.0;
+
+/// Q10 scale factor for envelope rates given a storage temperature.
+/// Returns `Q10^((T - T_ref)/10)` so colder T → smaller factor → slower
+/// envelope evolution.
+pub fn q10_rate_scale(temperature_celsius: f64) -> f64 {
+    Q10.powf((temperature_celsius - Q10_REFERENCE_CELSIUS) / 10.0)
 }
 
 impl StorageSimConfig {
@@ -112,6 +140,38 @@ impl StorageSimConfig {
             lesion_config: additive.lesion_config(),
             use_exponential_pump_envelope: additive.uses_exponential_pump_envelope(),
             ..Self::default()
+        }
+    }
+
+    /// Phase 14.D.2: build a supercooled (-4 °C) storage config with the
+    /// given additive. Per Bruinsma 2019 / Berendsen 2014 supercooled
+    /// storage protocols, this should approximately match standard 4 °C
+    /// storage of the same additive at ~2× the duration thanks to Q10
+    /// temperature scaling.
+    pub fn supercooled(additive: AdditiveSolution) -> Self {
+        Self {
+            temperature_celsius: -4.0,
+            end_day: 100.0,
+            ..Self::with_additive(additive)
+        }
+    }
+
+    /// Apply Q10 temperature scaling to the envelope rates. Called once
+    /// inside the simulator constructor; the resulting `StorageLesionConfig`
+    /// has rates scaled by `q10_rate_scale(temperature_celsius)` (or its
+    /// inverse for half-lives).
+    pub fn temperature_scaled_lesion_config(&self) -> StorageLesionConfig {
+        let scale = q10_rate_scale(self.temperature_celsius);
+        StorageLesionConfig {
+            // T_half scales inversely with rate.
+            atp_decay_half_life_days: self.lesion_config.atp_decay_half_life_days / scale,
+            // Direct rate scaling for everything else.
+            dpg_loss_rate_mM_per_day: self.lesion_config.dpg_loss_rate_mM_per_day * scale,
+            pump_efficiency_decay_per_day: self.lesion_config.pump_efficiency_decay_per_day * scale,
+            leak_increase_per_day: self.lesion_config.leak_increase_per_day * scale,
+            oxidative_stress_increase_per_day: self.lesion_config.oxidative_stress_increase_per_day * scale,
+            initial_atp_mM: self.lesion_config.initial_atp_mM,
+            initial_dpg_mM: self.lesion_config.initial_dpg_mM,
         }
     }
 }
@@ -127,6 +187,14 @@ const HESS_EFF_DECAY_PER_DAY: f64 = 0.305;
 
 fn hess_pump_efficiency(day: f64) -> f64 {
     HESS_EFF_INF + (1.0 - HESS_EFF_INF) * (-HESS_EFF_DECAY_PER_DAY * day).exp()
+}
+
+/// Hess pump efficiency at a Q10-scaled effective day. Equivalent to
+/// scaling the decay-rate constant β by `temp_scale` (colder T → smaller
+/// scale → slower pump failure → higher efficiency at the same storage
+/// day).
+fn hess_pump_efficiency_scaled(day: f64, temp_scale: f64) -> f64 {
+    hess_pump_efficiency(day * temp_scale)
 }
 
 /// Top-level orchestrator for a 42-day storage curve simulation.
@@ -159,7 +227,10 @@ impl StorageCurveSimulator {
         solver_config.dt_sec = config.bio_dt_sec;
         let solver = FullyIntegratedSolver::new(solver_config);
         let pool = MetabolitePool::default_fully_integrated();
-        let storage = StorageLesionModel::with_config(0.0, config.lesion_config.clone());
+        // Q10-scaled lesion config: at sub-4°C temperatures the envelope
+        // rates slow down per the storage Q10 ≈ 2.5.
+        let scaled_lesion = config.temperature_scaled_lesion_config();
+        let storage = StorageLesionModel::with_config(0.0, scaled_lesion);
         let indices = FullyIntegratedIndices::new();
         // Default Phase 8 coupling: ATP_ref = 2.0 mM, max stiffening
         // factor = 0.5 (50% stiffer at zero ATP). This sets the ATP →
@@ -190,7 +261,10 @@ impl StorageCurveSimulator {
         let deformability_relative = if stiff > 1e-9 { 1.0 / stiff } else { 0.0 };
 
         let pump_eff = if self.config.use_exponential_pump_envelope {
-            hess_pump_efficiency(self.storage.storage_days)
+            hess_pump_efficiency_scaled(
+                self.storage.storage_days,
+                q10_rate_scale(self.config.temperature_celsius),
+            )
         } else {
             pump_efficiency(&self.storage)
         };
@@ -217,8 +291,12 @@ impl StorageCurveSimulator {
     /// then push a sample.
     fn step_to_day(&mut self, target_day: f64) {
         // === 1. Update storage envelope ===
-        self.storage =
-            StorageLesionModel::with_config(target_day, self.config.lesion_config.clone());
+        // Use Q10-scaled rates so subzero (-4 °C) supercooled storage
+        // produces proportionally slower envelope evolution.
+        self.storage = StorageLesionModel::with_config(
+            target_day,
+            self.config.temperature_scaled_lesion_config(),
+        );
 
         // === 2. Optionally force ATP and 2,3-DPG to envelope targets ===
         if self.config.force_atp_dpg_targets {
@@ -235,9 +313,16 @@ impl StorageCurveSimulator {
 
         // Pump efficiency (Phase 14.B'' exponential envelope when
         // `use_exponential_pump_envelope = true`, else fall back to
-        // `StorageLesionModel`'s linear formula).
+        // `StorageLesionModel`'s linear formula). Both paths apply the
+        // Q10 temperature scaling — the linear path through
+        // `temperature_scaled_lesion_config()` (already in
+        // `self.storage.config`) and the exponential path through the
+        // explicit Q10 scale.
         let pump = if self.config.use_exponential_pump_envelope {
-            hess_pump_efficiency(target_day)
+            hess_pump_efficiency_scaled(
+                target_day,
+                q10_rate_scale(self.config.temperature_celsius),
+            )
         } else {
             pump_efficiency(&self.storage)
         };
