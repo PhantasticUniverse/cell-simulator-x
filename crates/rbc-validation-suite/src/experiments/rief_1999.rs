@@ -18,8 +18,8 @@
 //! discrepancy and use the in-situ reference values that match the model's
 //! assumed configuration.
 
-use crate::physics::wlc::{WLCParameters, WLCSolver};
-use crate::validation::{
+use cell_simulator_x::physics::wlc::{WLCParameters, WLCSolver};
+use crate::{
     metrics::compute_metrics,
     reference_curve::{CurveMetadata, ValidationCurve},
     ExperimentResult,

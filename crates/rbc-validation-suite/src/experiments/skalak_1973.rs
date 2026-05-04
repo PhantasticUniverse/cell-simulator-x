@@ -35,8 +35,8 @@
 //! reported aspect ratio range; dynamic-simulation reproduction
 //! becomes high-value once the headline preprint demands it.
 
-use crate::physics::membrane::SkalakMaterial;
-use crate::validation::{
+use cell_simulator_x::physics::membrane::SkalakMaterial;
+use crate::{
     metrics::compute_metrics,
     reference_curve::{CurveMetadata, ValidationCurve},
     ExperimentResult,

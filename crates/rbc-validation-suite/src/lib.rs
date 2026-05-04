@@ -4,6 +4,14 @@
 //! outputs against quantitative published data (Imai 1981, Mulquiney 1999,
 //! Rief 1999, Waugh & Evans 1979, Dao 2003) using χ²/dof as the primary metric.
 //!
+//! Phase 17.1: carved out into its own workspace member crate so the
+//! validation harness is a separately citable artifact for the preprint.
+
+// Allow non-snake-case for unit suffixes in field/variable names (μN, μm, pN, etc.).
+// Inherited convention from `cell-simulator-x` ("Units in names": `force_uN`,
+// `velocity_um_per_sec`, etc.).
+#![allow(non_snake_case)]
+//!
 //! Unlike the existing `tests/` suite — which checks that outputs fall within
 //! physiological ranges — this module evaluates how well the model reproduces
 //! measured curves with their published uncertainty bars.

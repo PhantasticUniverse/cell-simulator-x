@@ -18,8 +18,8 @@
 //! This experiment validates the model's `SkalakMaterial` defaults against
 //! these published values directly.
 
-use crate::physics::membrane::SkalakMaterial;
-use crate::validation::{
+use cell_simulator_x::physics::membrane::SkalakMaterial;
+use crate::{
     metrics::compute_metrics,
     reference_curve::{CurveMetadata, ValidationCurve},
     ExperimentResult,

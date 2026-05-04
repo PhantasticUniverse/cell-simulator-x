@@ -12,10 +12,10 @@
 //! 2. PPP flux as a fraction of glycolytic flux (the canary the audit flagged
 //!    as ~40% in the current model vs ~5–15% physiological).
 
-use crate::biochemistry::{
+use cell_simulator_x::biochemistry::{
     FullyIntegratedConfig, FullyIntegratedSolver, MetabolitePool, FullyIntegratedIndices,
 };
-use crate::validation::{
+use crate::{
     metrics::compute_metrics,
     reference_curve::{CurveMetadata, ValidationCurve},
     ExperimentResult,

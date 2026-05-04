@@ -32,8 +32,8 @@
 //! Future work: full simulation-based reproduction with `flow::SimpleShear`
 //! + spectral analysis of vertex orbital motion (Phase 12.C.3 candidate).
 
-use crate::config::Parameters;
-use crate::validation::{
+use cell_simulator_x::config::Parameters;
+use crate::{
     metrics::compute_metrics,
     reference_curve::{CurveMetadata, ValidationCurve},
     ExperimentResult,

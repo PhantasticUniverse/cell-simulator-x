@@ -15,10 +15,10 @@
 //! The σ values quoted here are typical for in-vitro OEC microspectroscopy
 //! (Imai's reported precision: ±0.01 in saturation, ±0.5 mmHg in P50).
 
-use crate::biochemistry::{
+use cell_simulator_x::biochemistry::{
     HemoglobinSolver, STANDARD_PH, STANDARD_DPG_MM, STANDARD_TEMPERATURE_K, STANDARD_PCO2_MMHG,
 };
-use crate::validation::{
+use crate::{
     metrics::compute_metrics,
     reference_curve::{CurveMetadata, ValidationCurve},
     ExperimentResult,

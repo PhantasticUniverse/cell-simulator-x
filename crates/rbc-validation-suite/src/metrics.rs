@@ -101,7 +101,7 @@ pub fn compute_metrics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validation::reference_curve::CurveMetadata;
+    use crate::reference_curve::CurveMetadata;
 
     fn metadata() -> CurveMetadata {
         CurveMetadata {

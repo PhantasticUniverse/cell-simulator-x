@@ -19,8 +19,8 @@
 //! immersed boundary). Until then, we report a "configuration-only" check
 //! that the model's shear modulus parameter falls in Dao's measured band.
 
-use crate::physics::membrane::SkalakMaterial;
-use crate::validation::{
+use cell_simulator_x::physics::membrane::SkalakMaterial;
+use crate::{
     metrics::compute_metrics,
     reference_curve::{CurveMetadata, ValidationCurve},
     ExperimentResult,

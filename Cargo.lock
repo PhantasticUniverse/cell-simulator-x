@@ -389,6 +389,7 @@ dependencies = [
  "rand",
  "rand_distr",
  "rayon",
+ "rbc-validation-suite",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -2168,6 +2169,18 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "rbc-validation-suite"
+version = "0.1.0"
+dependencies = [
+ "cell-simulator-x",
+ "chrono",
+ "csv",
+ "rand",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

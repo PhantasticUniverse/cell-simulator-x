@@ -1218,33 +1218,17 @@ fn run_multi_cell_diagnostic(n_cells: usize, duration_sec: f64) -> Result<()> {
 
 /// Phase 10: run the empirical validation suite.
 ///
-/// Available only when the `validation` Cargo feature is enabled. Without
-/// it, the binary prints a helpful message rather than failing silently.
-#[cfg(feature = "validation")]
+/// Phase 17.1: the validation suite lives in the workspace member crate
+/// `rbc-validation-suite` so it can be separately cited in the preprint.
+/// `cell-simulator-x` cannot pull it in at the lib level (that would create
+/// a Cargo cycle, since the suite depends on `cell-simulator-x`), so the
+/// `--validate` CLI flag now redirects to the suite's own binary.
 fn run_validation() -> Result<()> {
-    println!("=== Cell Simulator X — Phase 10 Validation ===\n");
-    let report = cell_simulator_x::validation::run_full_suite();
-    report.print_summary();
-
-    let path = format!("target/validation/{}.json", report.commit_sha);
-    report.write_json(&path).map_err(anyhow::Error::from)?;
-    println!("\nFull report written to {}", path);
-
-    if report.all_passed() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "{} of {} experiments failed (see notes above)",
-            report.total_count - report.passed_count,
-            report.total_count
-        ))
-    }
-}
-
-#[cfg(not(feature = "validation"))]
-fn run_validation() -> Result<()> {
-    eprintln!("--validate requires the `validation` Cargo feature.");
-    eprintln!("Re-run with: cargo run --features validation -- --validate");
+    eprintln!("--validate has moved to the rbc-validation-suite workspace member.");
+    eprintln!("Run the suite directly with:");
+    eprintln!("    cargo run -p rbc-validation-suite --bin validate --release");
+    eprintln!("Or run the integration test through the new crate with:");
+    eprintln!("    cargo test --features validation --test validation_suite -- --nocapture");
     std::process::exit(2);
 }
 

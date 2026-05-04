@@ -2,7 +2,7 @@
 //!
 //! Each submodule reproduces a published reference dataset and compares
 //! the simulator's prediction against it. The functions here are the
-//! entry points referenced by [`crate::validation::run_full_suite`].
+//! entry points referenced by [`crate::run_full_suite`].
 
 pub mod dao_2003;
 pub mod fischer_2007;

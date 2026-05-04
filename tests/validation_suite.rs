@@ -11,7 +11,7 @@
 
 #![cfg(feature = "validation")]
 
-use cell_simulator_x::validation::run_full_suite;
+use rbc_validation_suite::run_full_suite;
 
 #[test]
 fn full_validation_suite_runs() {

@@ -92,10 +92,17 @@ pub mod storage;
 pub mod world;
 
 // Phase 10: Empirical validation against published reference curves.
-// Gated behind the `validation` feature so production builds and the GUI
-// pipeline don't compile the validation harness.
-#[cfg(feature = "validation")]
-pub mod validation;
+// Phase 17.1: lifted into a separately citable workspace member crate
+// (`rbc-validation-suite`). cell-simulator-x intentionally does NOT depend
+// on the suite at the lib level — the suite depends on cell-simulator-x to
+// reach the simulator's biochemistry/physics types, and a reverse edge here
+// would create a Cargo cycle. Consumers should depend on `rbc-validation-suite`
+// directly:
+//
+//     [dev-dependencies]
+//     rbc-validation-suite = { path = "crates/rbc-validation-suite" }
+//
+// or via `cargo run -p rbc-validation-suite --bin validate`.
 
 pub use biochemistry::{
     MetabolismSolver, MetabolismConfig, MetabolitePool, MetabolismDiagnostics,
