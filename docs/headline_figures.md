@@ -123,6 +123,19 @@ Slit-width effect is monotonic (0.5 μm: 1.27 μm displacement; 1.0 μm:
 `docs/phase_c_hybrid_notes.md` for the detailed limitation discussion
 and follow-on options.
 
+**Drag-regime diagnostic (Stream A follow-on).** A 3D sweep over
+(day, width, drag_coeff) — `target/splenic_transit_drag_sensitivity.csv`,
+36 rows from `transit_drag_sensitivity_sweep_emits_csv` — confirms
+the system is **stiffness-saturated, not drag-saturated**: lowering
+`drag_coeff` 10× from the default 5.0 down to 0.5 does not expose a
+storage-day signal (max |Δ(d42 − d0)/d0| = 1.20% across all 12 (width,
+drag) cells, vs the 5% threshold for stiffness sensitivity). The
+slit-width effect dominates at the current shear-modulus-only coupling;
+storage-day amplification requires either an enlarged
+`SpectrinModulator.max_stiffening_factor`, ATP→bending / ATP→viscosity
+couplings, or upstream pressure / multi-cell context (Phase 13
+follow-on).
+
 ---
 
 ## Figure 6: GPU vs CPU parity validation
