@@ -1,11 +1,31 @@
 # Cell Simulator X — Headline Figures
 
 Reproduction recipes for each figure that supports the preprint. Every
-figure has a single command that produces a CSV under `target/` and a
-follow-on plotting step (the plotting scripts are TBD; CSVs are
-provided so any plotting tool can be used).
+figure has a `make figure-*` target that produces a CSV under `target/`
+and a publication-grade PNG under `figures/`. The CSVs remain the
+canonical scientific artifact; the PNGs are the preprint deliverables
+rendered from the same data.
 
 All commands assume the project is built (`cargo build --release`).
+
+## Python plotting prerequisites
+
+Phase 17.4 added Python matplotlib scripts in `scripts/figures/` for
+each figure. To regenerate the PNGs you need `pandas>=2.0` and
+`matplotlib>=3.7`:
+
+```bash
+pip install -r scripts/figures/requirements.txt
+# or simply:  pip install pandas matplotlib
+```
+
+PNGs land in `figures/` (kept close to `target/` so the deliverables
+sit alongside the CSVs they were rendered from). After the CSVs exist,
+you can re-render every PNG without re-running cargo via:
+
+```bash
+make figures-png
+```
 
 ---
 
@@ -73,12 +93,15 @@ Keller-Skalak 1982 analytic prediction matched against Fischer 2007
 reported physiological-viscosity range.
 
 ```bash
-cargo test --features validation --release \
-    validation::experiments::fischer_2007 -- --nocapture
+cargo test --release --test headline_validation_csvs \
+    tank_treading_emits_csv -- --nocapture
+# Writes target/tank_treading_fischer_2007.csv (7 shear rates)
 ```
 
-Predicted f_TT ≈ 0.075·γ̇ Hz (with γ̇ in 1/s) for canonical RBC
-semi-axes 4×1 μm, falling in Fischer's K(λ) range 0.04–0.15.
+CSV columns: `shear_rate_per_sec, predicted_freq_hz, fischer_low_hz,
+fischer_high_hz`. Predicted f_TT ≈ 0.075·γ̇ Hz (with γ̇ in 1/s) for
+canonical RBC semi-axes 4×1 μm, falling in Fischer's K(λ) range
+0.04–0.15.
 
 ---
 
@@ -87,12 +110,16 @@ semi-axes 4×1 μm, falling in Fischer's K(λ) range 0.04–0.15.
 Capillary number + empirical AR(Ca) fit.
 
 ```bash
-cargo test --features validation --release \
-    validation::experiments::skalak_1973 -- --nocapture
+cargo test --release --test headline_validation_csvs \
+    parachute_emits_csv -- --nocapture
+# Writes target/parachute_skalak_1973.csv (6 shear rates)
 ```
 
-Predicted AR: 1.40 / 1.66 / 2.13 at γ̇_wall ∈ {100, 200, 400} 1/s,
-within Skalak 1973's reported 1.5–2.0 band.
+CSV columns: `shear_rate_per_sec, capillary_number,
+predicted_aspect_ratio, skalak_low, skalak_high`. Predicted AR: 1.42 /
+1.78 / 2.20 / 2.34 / 2.43 / 2.46 at γ̇_wall ∈ {100, 200, 400, 600, 800,
+1000} 1/s, with Skalak 1973's reported 1.5–2.0 band shaded for
+reference.
 
 ---
 
@@ -159,7 +186,7 @@ Worst-fit relative errors:
 
 ## Reproducibility
 
-A `Makefile` (Phase 17.2) provides one-line targets per figure:
+A `Makefile` (Phase 17.2 + 17.4) provides one-line targets per figure:
 
 ```bash
 make figure-storage         # Figure 1
@@ -168,12 +195,13 @@ make figure-sensitivity     # Figure 2 part B
 make figure-tank-treading   # Figure 3
 make figure-parachute       # Figure 4
 make figure-splenic-transit # Figure 5
-make figures                # all of the above
+make figures                # all of the above (CSVs + PNGs)
+make figures-png            # re-render PNGs from existing CSVs only
 ```
 
-Each target writes a CSV to `target/`. Plotting is left to the consumer
-(matplotlib, gnuplot, R, etc.); the plotting scripts will be added in
-the preprint repo.
+Each `figure-*` target (a) runs the cargo test that emits the CSV under
+`target/`, then (b) renders the PNG into `figures/` via the matching
+Python script in `scripts/figures/`.
 
 To reproduce the entire paper artifact:
 

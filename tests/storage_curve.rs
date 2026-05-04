@@ -234,4 +234,16 @@ fn write_csv_succeeds() {
     // 1 header + 43 samples.
     assert_eq!(line_count, 44);
     let _ = std::fs::remove_file(&path);
+
+    // Phase 17.4: also emit to target/ for the figure-1 plotting pipeline.
+    // The Python script `scripts/figures/figure1_storage.py` reads this
+    // stable path. CARGO_MANIFEST_DIR points at the project root.
+    let target_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
+    let _ = std::fs::create_dir_all(&target_dir);
+    let target_path = target_dir.join("storage_curve.csv");
+    sim.write_csv(&target_path).expect("csv write to target/");
+    let target_written =
+        std::fs::read_to_string(&target_path).expect("read back target csv");
+    assert!(target_written.starts_with("day,atp_mM"));
+    assert_eq!(target_written.lines().count(), 44);
 }

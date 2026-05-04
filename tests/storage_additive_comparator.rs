@@ -162,6 +162,58 @@ fn additive_day0_states_match() {
 }
 
 #[test]
+fn additive_comparator_emits_csv() {
+    // Phase 17.4: emit a wide-format CSV with all four additives' 42-day
+    // ATP / 2,3-DPG / deformability trajectories for figure 2A.
+    use std::io::Write;
+
+    let target_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
+    std::fs::create_dir_all(&target_dir).expect("create target dir");
+    let path = target_dir.join("storage_additive_comparator.csv");
+    let mut f = std::fs::File::create(&path).expect("create csv file");
+    writeln!(f, "additive,day,atp_mM,dpg23_mM,deformability_relative")
+        .expect("write header");
+
+    let additives = [
+        AdditiveSolution::Cpd,
+        AdditiveSolution::As3,
+        AdditiveSolution::Sagm,
+        AdditiveSolution::Paggsm,
+    ];
+
+    let mut total_rows = 0usize;
+    for additive in additives {
+        let sim = run_additive(additive);
+        for s in sim.samples() {
+            writeln!(
+                f,
+                "{},{:.4},{:.6},{:.6},{:.6}",
+                additive.name(),
+                s.day,
+                s.atp_mM,
+                s.dpg23_mM,
+                s.deformability_relative
+            )
+            .expect("write row");
+            total_rows += 1;
+        }
+    }
+
+    // 4 additives × 43 samples (day 0..=42) = 172 rows.
+    assert_eq!(
+        total_rows,
+        4 * 43,
+        "expected 4×43=172 rows, got {}",
+        total_rows
+    );
+    println!(
+        "Phase 17.4: wrote {} rows to {}",
+        total_rows,
+        path.display()
+    );
+}
+
+#[test]
 fn additive_dpg_depletion_uniform_by_day_14() {
     // 2,3-DPG depletes by ~day 14 across all additives (Hess 2010,
     // Zimrin 2009 — additive solution does not strongly modulate
