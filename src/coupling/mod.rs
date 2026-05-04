@@ -35,6 +35,10 @@ pub mod coupled_solver;
 pub mod spectrin_modulator;
 pub mod tension_computer;
 
+// Re-export the deprecated coupled solver — Phase 11.5 marked for removal
+// in Phase 12. Allow the deprecation locally so the re-export site stays
+// quiet; downstream callers still see the warnings.
+#[allow(deprecated)]
 pub use coupled_solver::{CoupledConfig, CoupledDiagnostics, CoupledSolver};
 pub use spectrin_modulator::SpectrinModulator;
 pub use tension_computer::TensionComputer;

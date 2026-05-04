@@ -62,7 +62,13 @@ impl Default for StorageLesionConfig {
         Self {
             atp_decay_half_life_days: 21.0,  // Hess 2010
             dpg_loss_rate_mM_per_day: 0.4,   // ~5 mM over 14 days (Zimrin 2009)
-            pump_efficiency_decay_per_day: 0.02,  // 2%/day (Luten 2008)
+            // Phase 14.B' calibration: 0.02 → 0.0168/day. With the QSS
+            // ion solver, this lands the day-42 ion gradient at Na ≈ 60
+            // mM and K ≈ 90 mM — matching Hess 2010's quantitative
+            // targets exactly (for the linear-envelope assumption; the
+            // intermediate day-14 number remains slightly underestimated
+            // — see docs/phase_14_notes.md).
+            pump_efficiency_decay_per_day: 0.0168,
             leak_increase_per_day: 0.015,    // 1.5%/day
             oxidative_stress_increase_per_day: 0.03,  // 3%/day
             initial_atp_mM: 2.0,

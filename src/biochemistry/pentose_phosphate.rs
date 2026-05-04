@@ -134,8 +134,15 @@ impl Glucose6PhosphateDehydrogenase {
     pub fn new(indices: &RedoxIndices) -> Self {
         Self {
             // Reference: Beutler 1984, Kirkman 1986
-            // Vmax set to maintain NADPH/NADP+ ratio 10-20 at steady state
-            vmax_mM_per_sec: 0.06,
+            // Phase 10 refit (validation against Mulquiney 1999): lowered Vmax
+            // from 0.06 → 0.004 mM/s. The previous value drove PPP flux to
+            // ~40% of glycolysis flux versus the physiological 5–15% range
+            // (Beutler 1984; Kirkman & Gaetani 1984). 0.004 mM/s + the
+            // companion GR refit yields PPP fraction ~10% with NADPH/NADP+
+            // in the 5–10 range. The canonical 10–20 ratio additionally
+            // requires lowering the in-line basal NADPH-consumption hack
+            // in full_integration.rs — left as a Phase 11 follow-on.
+            vmax_mM_per_sec: 0.004,
             km_g6p_mM: 0.039,
             km_nadp_mM: 0.005,
             ki_nadph_mM: 0.005, // Strong NADPH inhibition
@@ -241,8 +248,11 @@ pub struct Phosphogluconate6Dehydrogenase {
 impl Phosphogluconate6Dehydrogenase {
     pub fn new(indices: &RedoxIndices) -> Self {
         Self {
-            // Vmax scaled with G6PDH to maintain pathway balance
-            vmax_mM_per_sec: 0.04,
+            // Phase 10 refit: scaled with G6PDH from 0.04 → 0.003 (×0.075).
+            // Reference: Beutler 1984 reports tissue Vmax ≈ 0.42 mM/s; the
+            // *effective* in-cell Vmax is much lower because of NADPH
+            // inhibition and substrate limitation.
+            vmax_mM_per_sec: 0.003,
             km_6pg_mM: 0.035,
             km_nadp_mM: 0.008,
             stoichiometry: ReactionStoichiometry::new(

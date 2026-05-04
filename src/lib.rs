@@ -79,13 +79,30 @@
 #![allow(non_snake_case)]
 
 pub mod biochemistry;
+pub mod compute;
 pub mod config;
 pub mod coupling;
 pub mod export;
+pub mod flow;
 pub mod geometry;
 pub mod physics;
 pub mod render;
 pub mod state;
+pub mod storage;
+pub mod world;
+
+// Phase 10: Empirical validation against published reference curves.
+// Phase 17.1: lifted into a separately citable workspace member crate
+// (`rbc-validation-suite`). cell-simulator-x intentionally does NOT depend
+// on the suite at the lib level — the suite depends on cell-simulator-x to
+// reach the simulator's biochemistry/physics types, and a reverse edge here
+// would create a Cargo cycle. Consumers should depend on `rbc-validation-suite`
+// directly:
+//
+//     [dev-dependencies]
+//     rbc-validation-suite = { path = "crates/rbc-validation-suite" }
+//
+// or via `cargo run -p rbc-validation-suite --bin validate`.
 
 pub use biochemistry::{
     MetabolismSolver, MetabolismConfig, MetabolitePool, MetabolismDiagnostics,
@@ -114,10 +131,22 @@ pub use biochemistry::{
 };
 pub use config::Parameters;
 // Phase 8: Mechano-Metabolic Coupling
+// CoupledSolver / CoupledConfig / CoupledDiagnostics are deprecated in
+// Phase 11.5 (slated for Phase 12 removal). The re-export stays so
+// external callers and `--diagnose-coupled` keep working; consumers of
+// the deprecated symbols see the warning at their use sites.
+#[allow(deprecated)]
 pub use coupling::{CoupledSolver, CoupledConfig, CoupledDiagnostics, TensionComputer, SpectrinModulator};
 // Export module
 pub use export::{CsvExporter, TimeSeriesRecord, export_state_json, save_screenshot};
+pub use flow::{
+    apply_drag_to_external_forces, apply_slit_drag_to_external_forces, drag_force_uN,
+    slit_drag_force_uN, CylindricalChannel, Poiseuille, SlitFlow, SplenicSlit,
+};
+pub use storage::{AdditiveSolution, StorageCurveSimulator, StorageSample, StorageSimConfig};
 pub use geometry::{Mesh, SpectrinNetwork};
 pub use physics::{PhysicsConfig, PhysicsSolver};
 pub use render::{Camera, ExportAction, HudColors, HudOverlay, HudState, HudTheme, RenderState};
 pub use state::{CellState, DiseaseIndicator, MetaboliteStatus, SimulationMetrics, SimulationMode};
+// Phase 10.5: Multi-cell World/Cell API
+pub use world::{Cell, CellHandle, World};

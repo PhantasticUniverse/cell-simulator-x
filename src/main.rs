@@ -1,5 +1,9 @@
 // Allow non-snake-case for unit suffixes in field names (mM, mmHg, K, etc.)
 #![allow(non_snake_case)]
+// CoupledSolver / CoupledConfig are #[deprecated] (Phase 11.5) but the
+// CLI's --diagnose-coupled and --diagnose-multi-cell modes still use
+// them until Phase 12.
+#![allow(deprecated)]
 
 //! Cell Simulator X - Entry point
 //!
@@ -208,6 +212,19 @@ struct CliArgs {
     diagnose_coupled: bool,
     diagnose_disease: Option<String>,
     disease_param: f64,
+    /// Phase 10: empirical validation against published reference curves.
+    /// Only available with the `validation` Cargo feature.
+    validate: bool,
+    /// Phase 10.5: multi-cell scaling diagnostic. Number of cells to run.
+    diagnose_multi_cell: Option<usize>,
+    /// Phase 11.0: GPU compute pipeline sentinel (vec_add CPU=GPU check).
+    diagnose_gpu: bool,
+    /// Phase C-hybrid: splenic transit at storage day N.
+    diagnose_splenic_transit: bool,
+    /// Storage day for splenic transit (default 21).
+    storage_day: f64,
+    /// Slit width for splenic transit (μm, default 0.7).
+    slit_width_um: f32,
     steps: usize,
     force: f32,
     duration_sec: f64,
@@ -239,6 +256,12 @@ impl Default for CliArgs {
             diagnose_coupled: false,
             diagnose_disease: None,
             disease_param: 0.0,
+            validate: false,
+            diagnose_multi_cell: None,
+            diagnose_gpu: false,
+            diagnose_splenic_transit: false,
+            storage_day: 21.0,
+            slit_width_um: 0.7,
             steps: 1000,
             force: 5.0,
             duration_sec: 60.0,  // 60 seconds default for metabolism
@@ -271,6 +294,27 @@ fn parse_args() -> CliArgs {
             "--diagnose-redox" => cli.diagnose_redox = true,
             "--diagnose-full" => cli.diagnose_full = true,
             "--diagnose-coupled" => cli.diagnose_coupled = true,
+            "--validate" => cli.validate = true,
+            "--diagnose-multi-cell" => {
+                i += 1;
+                if i < args.len() {
+                    cli.diagnose_multi_cell = Some(args[i].parse().unwrap_or(10));
+                }
+            }
+            "--diagnose-gpu" => cli.diagnose_gpu = true,
+            "--diagnose-splenic-transit" => cli.diagnose_splenic_transit = true,
+            "--storage-day" => {
+                i += 1;
+                if i < args.len() {
+                    cli.storage_day = args[i].parse().unwrap_or(21.0);
+                }
+            }
+            "--slit-width" => {
+                i += 1;
+                if i < args.len() {
+                    cli.slit_width_um = args[i].parse().unwrap_or(0.7);
+                }
+            }
             "--diagnose-disease" => {
                 i += 1;
                 if i < args.len() {
@@ -374,6 +418,9 @@ fn parse_args() -> CliArgs {
                 println!("  --diagnose-redox       Run redox/antioxidant diagnostics (no GUI)");
                 println!("  --diagnose-full        Run fully integrated diagnostics (glycolysis+PPP+Hb) (no GUI)");
                 println!("  --diagnose-coupled     Run mechano-metabolic coupling diagnostics (no GUI)");
+                println!("  --validate             Phase 10: empirical validation suite (requires --features validation)");
+                println!("  --diagnose-multi-cell N  Phase 10.5: multi-cell scaling diagnostic, N cells");
+                println!("  --diagnose-gpu         Phase 11.0: GPU compute sentinel (vec_add CPU=GPU)");
                 println!("  --diagnose-disease D   Run disease model diagnostics (storage|diabetic|malaria|sickle)");
                 println!("  -n, --steps N          Number of physics steps (default: 1000)");
                 println!("  -f, --force F          Force magnitude in μN (default: 5.0)");
@@ -953,6 +1000,7 @@ fn run_disease_diagnostics(
 }
 
 /// Run mechano-metabolic coupling diagnostics without GUI
+#[allow(deprecated)] // CoupledSolver is slated for Phase 12 removal; see docs/phase_11_5_notes.md
 fn run_coupled_diagnostics(
     duration_sec: f64,
     tension_override: f64,
@@ -1100,6 +1148,141 @@ fn run_coupled_diagnostics(
     Ok(())
 }
 
+/// Phase 10.5: multi-cell scaling diagnostic.
+///
+/// Builds a `World` of `n_cells` cells, runs `duration_sec` seconds of
+/// simulated time, and reports throughput. The N=1 baseline is also run
+/// for comparison so the user can see the per-cell wall-clock cost.
+fn run_multi_cell_diagnostic(n_cells: usize, duration_sec: f64) -> Result<()> {
+    use cell_simulator_x::config::Parameters;
+    use cell_simulator_x::coupling::CoupledConfig;
+    use cell_simulator_x::world::World;
+
+    println!("=== Cell Simulator X — Multi-Cell Scaling Diagnostic ===\n");
+    println!("Cells:     {}", n_cells);
+    println!("Duration:  {:.2} s simulated", duration_sec);
+
+    let params = Parameters::load_or_default();
+    let config = CoupledConfig {
+        // Reduced substeps for tractable wall-clock at large N.
+        physics_substeps: 50,
+        ..CoupledConfig::default()
+    };
+
+    // Baseline run at N=1 to anchor the linear-scaling expectation.
+    println!("\n--- Baseline (N=1) ---");
+    let mut baseline = World::new(config.clone());
+    let baseline_handle = baseline.add_cell(&params);
+    let t0 = Instant::now();
+    baseline.run(duration_sec);
+    let baseline_elapsed = t0.elapsed();
+    println!("Wall-clock: {:.2?}", baseline_elapsed);
+
+    let baseline_diag = baseline.cell(baseline_handle).diagnostics();
+    println!("ATP @ N=1:  {:.3} mM", baseline_diag.atp_mM);
+
+    // Multi-cell run.
+    println!("\n--- Multi-cell (N={}) ---", n_cells);
+    let mut world = World::new(config);
+    let mut handles = Vec::with_capacity(n_cells);
+    for _ in 0..n_cells {
+        handles.push(world.add_cell(&params));
+    }
+    let t0 = Instant::now();
+    world.run(duration_sec);
+    let multi_elapsed = t0.elapsed();
+    println!("Wall-clock: {:.2?}", multi_elapsed);
+
+    // Linear-scaling factor: how much wall-clock did we pay per added cell?
+    // Embarrassingly-parallel ideal: N cells in (N / num_threads) × baseline.
+    let baseline_secs = baseline_elapsed.as_secs_f64().max(1e-6);
+    let multi_secs = multi_elapsed.as_secs_f64().max(1e-6);
+    let scaling = multi_secs / baseline_secs;
+    let per_cell_factor = scaling / n_cells as f64;
+    println!("Scaling:    {:.2}× baseline ({:.2}× per cell, ideal=1.0/threads)",
+        scaling, per_cell_factor);
+
+    // Show per-cell ATP variance (should be tiny — they're independent runs of the
+    // same simulator, only diverging via DPD random forces).
+    let atp_idx = world.cell(handles[0]).biochemistry.indices.glycolysis.atp;
+    let atps: Vec<f64> = world.cells().iter().map(|c| c.metabolites.get(atp_idx)).collect();
+    let atp_min = atps.iter().cloned().fold(f64::INFINITY, f64::min);
+    let atp_max = atps.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let atp_mean: f64 = atps.iter().sum::<f64>() / atps.len() as f64;
+    println!("ATP across {} cells: min={:.3} mean={:.3} max={:.3} mM",
+        n_cells, atp_min, atp_mean, atp_max);
+
+    println!("\n=== Done ===");
+    Ok(())
+}
+
+/// Phase 10: run the empirical validation suite.
+///
+/// Phase 17.1: the validation suite lives in the workspace member crate
+/// `rbc-validation-suite` so it can be separately cited in the preprint.
+/// `cell-simulator-x` cannot pull it in at the lib level (that would create
+/// a Cargo cycle, since the suite depends on `cell-simulator-x`), so the
+/// `--validate` CLI flag now redirects to the suite's own binary.
+fn run_validation() -> Result<()> {
+    eprintln!("--validate has moved to the rbc-validation-suite workspace member.");
+    eprintln!("Run the suite directly with:");
+    eprintln!("    cargo run -p rbc-validation-suite --bin validate --release");
+    eprintln!("Or run the integration test through the new crate with:");
+    eprintln!("    cargo test --features validation --test validation_suite -- --nocapture");
+    std::process::exit(2);
+}
+
+/// Phase C-hybrid: splenic transit at storage day N.
+///
+/// Reuses the storage simulator's `cell_state_at_day` snapshot, drops
+/// it into a `SplenicTransitConfig`, and prints the transit metrics.
+fn run_diagnose_splenic_transit(storage_day: f64, slit_width_um: f32) -> Result<()> {
+    use cell_simulator_x::flow::SplenicSlit;
+    use cell_simulator_x::storage::{
+        run_splenic_transit, SplenicTransitConfig, StorageCurveSimulator, StorageSimConfig,
+    };
+
+    println!("=== Splenic transit (storage day {:.1}, slit width {:.2} μm) ===",
+        storage_day, slit_width_um);
+    println!();
+
+    // Build storage simulator and snapshot at the requested day.
+    let cfg = StorageSimConfig {
+        seconds_of_bio_per_step: 1.0,
+        end_day: storage_day,
+        ..StorageSimConfig::default()
+    };
+    let sim = StorageCurveSimulator::new(cfg);
+    let snap = sim.cell_state_at_day(storage_day);
+
+    println!(
+        "Cell state at day {:.1}:\n  ATP    = {:.3} mM\n  pump η = {:.3}\n  leak ×  = {:.3}\n  stiff ×  = {:.3}\n  def     = {:.3}\n",
+        snap.day,
+        snap.pool.concentrations_mM[sim.indices.glycolysis.atp],
+        snap.pump_efficiency, snap.leak_multiplier,
+        snap.stiffness_modifier, snap.deformability_relative,
+    );
+
+    let transit_cfg = SplenicTransitConfig {
+        slit: SplenicSlit::with_width(slit_width_um),
+        timeout_simulated_sec: 0.5,
+        ..SplenicTransitConfig::default()
+    };
+
+    let r = run_splenic_transit(&snap, &transit_cfg);
+    println!("Transit result:");
+    println!("  wall shear rate       : {:.0} 1/s", r.wall_shear_rate_per_sec);
+    println!("  transit time          : {:.4} s ({})",
+        r.transit_time_sec,
+        if r.completed { "completed" } else { "TIMEOUT (clearance failure)" });
+    println!("  centroid displacement : {:.3} μm", r.centroid_displacement_um);
+    println!("  peak strain           : {:.3} (rel)", r.peak_strain_relative);
+    println!("  peak velocity         : {:.1} μm/s", r.peak_velocity_um_per_sec);
+    println!("  deformability index   : {:.3}", r.deformability_relative);
+    println!("  wall-clock            : {:.0} ms", r.wall_clock_ms);
+    Ok(())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -1154,6 +1337,22 @@ fn main() -> Result<()> {
             cli.po2_mmHg,
             cli.oxidative_stress,
         );
+    }
+
+    if cli.validate {
+        return run_validation();
+    }
+
+    if let Some(n) = cli.diagnose_multi_cell {
+        return run_multi_cell_diagnostic(n, cli.duration_sec);
+    }
+
+    if cli.diagnose_gpu {
+        return cell_simulator_x::compute::run_diagnose_gpu();
+    }
+
+    if cli.diagnose_splenic_transit {
+        return run_diagnose_splenic_transit(cli.storage_day, cli.slit_width_um);
     }
 
     log::info!("Cell Simulator X starting...");

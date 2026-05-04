@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/rbc-validation-suite"]
+resolver = "2"
+
 [package]
 name = "cell-simulator-x"
 version = "1.0.0"
@@ -45,12 +49,29 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 csv = "1.3"
 chrono = { version = "0.4", features = ["clock"] }
 
+[features]
+default = []
+# Phase 10: Empirical validation against published reference curves.
+# Phase 17.1: the suite was carved into the `rbc-validation-suite` workspace
+# member crate so it is separately citable. The feature is now a no-op marker
+# at the cell-simulator-x level — it gates the integration test below, which
+# pulls the suite in via `[dev-dependencies]`. To exercise the suite end-to-end
+# from the CLI use the suite's binary: `cargo run -p rbc-validation-suite --bin validate`.
+validation = []
+
 [dev-dependencies]
 criterion = "0.5"
+# Phase 17.1: integration test pulls in the carved-out validation suite.
+rbc-validation-suite = { path = "crates/rbc-validation-suite" }
 
 [[bench]]
 name = "geometry"
 harness = false
+
+[[test]]
+name = "validation_suite"
+path = "tests/validation_suite.rs"
+required-features = ["validation"]
 
 [profile.release]
 lto = true

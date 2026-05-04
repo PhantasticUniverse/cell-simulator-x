@@ -53,8 +53,11 @@ impl Default for RenderSettings {
 pub struct RenderState {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    /// Owned by `Arc` so a `crate::compute::ComputeContext` can borrow the
+    /// same device/queue and share storage buffers with the render path
+    /// (Phase 11.4).
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
     config: wgpu::SurfaceConfiguration,
     pub size: PhysicalSize<u32>,
 
@@ -115,7 +118,8 @@ impl RenderState {
 
         log::info!("Using adapter: {:?}", adapter.get_info());
 
-        // Create device and queue
+        // Create device and queue. Wrapped in `Arc` so a `ComputeContext`
+        // can share the same device for direct buffer sharing (Phase 11.4).
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -126,6 +130,8 @@ impl RenderState {
                 None,
             )
             .await?;
+        let device = Arc::new(device);
+        let queue = Arc::new(queue);
 
         // Configure surface
         let surface_caps = surface.get_capabilities(&adapter);
@@ -429,6 +435,17 @@ impl RenderState {
             view_formats: &[],
         });
         texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+    /// Shared `Arc<Device>` so a `ComputeContext` can dispatch on the same
+    /// physical device that owns the render-pipeline buffers.
+    pub fn shared_device(&self) -> Arc<wgpu::Device> {
+        Arc::clone(&self.device)
+    }
+
+    /// Shared `Arc<Queue>` for the same reason as `shared_device`.
+    pub fn shared_queue(&self) -> Arc<wgpu::Queue> {
+        Arc::clone(&self.queue)
     }
 
     /// Resize the render surface
